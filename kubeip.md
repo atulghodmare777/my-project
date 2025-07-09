@@ -7,6 +7,7 @@ Value: true
 
 # Create the static public ip using following command:
 gcloud compute addresses create kubeip-node-1   --region=asia-south1
+
 gcloud compute addresses list --filter="name=kubeip-node-1"
 
 # Now we need to label our Reserved Static IP Address (kubeip-node-1):
@@ -20,6 +21,22 @@ gcloud compute addresses describe kubeip-node-1 --region asia-south1 --format=js
 
 We should see an output like: "labels": { "environment": "demo", "kubeip": "reserved" }.
 
+$ Now if want to attach 2nd static public ip to the 2nd node 
+
+#Create a second static public IP: kubeip-node-2
+
+gcloud compute addresses create kubeip-node-2 --region=asia-south1 --quiet
+
+# Verify the ip:
+gcloud compute addresses list --filter="name=kubeip-node-2"
+
+# Label the Second Static IP:
+gcloud beta compute addresses update kubeip-node-2 \
+  --region asia-south1 \
+  --update-labels=kubeip=reserved,environment=dev
+
+Verify the label:
+gcloud compute addresses describe kubeip-node-2 --region asia-south1 --format=json 
 
 # check if the worklad identity is set for the cluster, to check run following command:
 gcloud container clusters describe n7-playground-cluster \
@@ -220,22 +237,6 @@ kubectl logs podname -n kubesystem > In output we should see following msg
 
 kubectl get nodes -o wide
 
-$ Now if want to attach 2nd static public ip to the 2nd node 
-#Create a second static public IP: kubeip-node-2
-
-gcloud compute addresses create kubeip-node-2 --region=asia-south1 --quiet
-
-# Verify the ip:
-gcloud compute addresses list --filter="name=kubeip-node-2"
-
-# Label the Second Static IP:
-gcloud beta compute addresses update kubeip-node-2 \
-  --region asia-south1 \
-  --update-labels=kubeip=reserved,environment=dev
-
-Verify the label:
-gcloud compute addresses describe kubeip-node-2 --region asia-south1 --format=json 
-
 # Scale Your Node Pool to 2 Nodes:
 
 gcloud container clusters resize test \
@@ -252,7 +253,7 @@ gcloud compute addresses delete kubeip-node-1 \
 # TO find out which type of cluster autoscaler present
 gcloud container clusters describe n7-playground-cluster   --zone asia-south1-c   --format="yaml" | yq '.autoscaling'
 
-# To update the autoscaling profile:
+# Update the autoscaling profile to balance as for cluster-optimised it will not work
 gcloud container clusters update kubeip-cluster \
   --zone asia-south1-c \
   --autoscaling-profile balanced
