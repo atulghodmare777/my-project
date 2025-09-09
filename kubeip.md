@@ -212,6 +212,8 @@ spec:
               value: "true"
             - name: TAINT_KEY
               value: "kubeip.com/not-ready" 
+            - name: IPV6
+              value: "true"
           securityContext:
             privileged: false
             allowPrivilegeEscalation: false
