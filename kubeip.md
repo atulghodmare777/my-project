@@ -1,70 +1,99 @@
-Kubeip deployment using taint:
+# KubeIP Deployment using Taint
 
-Apply taint to the nodepool:
-Effect: NO_SCHEDULE 
-Key: kubeip.com/not-ready
-Value: true
+This guide provides step-by-step instructions to deploy **KubeIP** on a GKE cluster using **taints and tolerations**.
 
-# Create the static public ip using following command:
-gcloud compute addresses create kubeip-node-1   --region=asia-south1
+---
 
+## 1. Configure Autoscaling
+
+If using autoscaling in the nodes, the following step is a must.
+
+Find out which type of cluster autoscaler is present:
+
+```bash
+gcloud container clusters describe n7-playground-cluster   --zone asia-south1-c   --format="yaml" | yq '.autoscaling'
+```
+
+Update the autoscaling profile to `balanced` (as `cluster-optimised` will not work):
+
+```bash
+gcloud container clusters update kubeip-cluster   --zone asia-south1-c   --autoscaling-profile balanced
+```
+
+---
+
+## 2. Create and Label Static Public IPs
+
+Create the first static public IP:
+
+```bash
+gcloud compute addresses create kubeip-node-1 --region=asia-south1
 gcloud compute addresses list --filter="name=kubeip-node-1"
+```
 
-# Now we need to label our Reserved Static IP Address (kubeip-node-1):
+Label the reserved static IP:
 
-gcloud beta compute addresses update kubeip-node-1 \
-  --region asia-south1 \
-  --update-labels=kubeip=reserved,environment=dev
+```bash
+gcloud beta compute addresses update kubeip-node-1   --region asia-south1   --update-labels=kubeip=reserved,environment=dev
+```
 
-Verify IP labels:
-gcloud compute addresses describe kubeip-node-1 --region asia-south1 --format=json 
+Verify labels:
 
-We should see an output like: "labels": { "environment": "demo", "kubeip": "reserved" }.
+```bash
+gcloud compute addresses describe kubeip-node-1   --region asia-south1   --format=json
+```
 
-$ Now if want to attach 2nd static public ip to the 2nd node 
+> You should see an output like:  
+> `"labels": { "environment": "demo", "kubeip": "reserved" }`
 
-#Create a second static public IP: kubeip-node-2
+### Add a Second Static IP
 
-gcloud compute addresses create kubeip-node-2 --region=asia-south1 --quiet
-
-# Verify the ip:
+```bash
+gcloud compute addresses create kubeip-node-2 --region asia-south1 --quiet
 gcloud compute addresses list --filter="name=kubeip-node-2"
+gcloud beta compute addresses update kubeip-node-2   --region asia-south1   --update-labels=kubeip=reserved,environment=dev
+gcloud compute addresses describe kubeip-node-2   --region asia-south1   --format=json
+```
 
-# Label the Second Static IP:
-gcloud beta compute addresses update kubeip-node-2 \
-  --region asia-south1 \
-  --update-labels=kubeip=reserved,environment=dev
+---
 
-Verify the label:
-gcloud compute addresses describe kubeip-node-2 --region asia-south1 --format=json 
+## 3. Enable Workload Identity
 
-# check if the worklad identity is set for the cluster, to check run following command:
-gcloud container clusters describe n7-playground-cluster \
-    --region=asia-south1-c \
-    --project=nviz-playground \
-    --flatten 'workloadIdentityConfig'
+Check if Workload Identity is enabled:
 
-# If not set then Enable Workload Identity on Your GKE Cluster (Cluster Level):
+```bash
+gcloud container clusters describe n7-playground-cluster   --region=asia-south1-c   --project=nviz-playground   --flatten 'workloadIdentityConfig'
+```
 
-gcloud container clusters update n7-playground-cluster \
-  --zone asia-south1-c \
-  --workload-pool=nviz-playground.svc.id.goog   # in workload pool project id will come
+If not set, enable it:
 
-# Enable GKE Metadata Server on Node Pool:
-gcloud container node-pools update kubeip-pool \
-  --cluster n7-playground-cluster \
-  --zone asia-south1-c \
-  --workload-metadata=GKE_METADATA
+```bash
+gcloud container clusters update n7-playground-cluster   --zone asia-south1-c   --workload-pool=nviz-playground.svc.id.goog
+```
 
-# Create a Dedicated GCP Service Account for KubeIP:
-gcloud iam service-accounts create kubeip-gcp-sa \
-  --display-name "KubeIP GCP Service Account for Workload Identity" \
-  --project nviz-playground
+Enable GKE Metadata Server on the node pool:
+
+```bash
+gcloud container node-pools update kubeip-pool   --cluster n7-playground-cluster   --zone asia-south1-c   --workload-metadata=GKE_METADATA
+```
+
+---
+
+## 4. Create GCP Service Account
+
+```bash
+gcloud iam service-accounts create kubeip-gcp-sa   --display-name "KubeIP GCP Service Account for Workload Identity"   --project nviz-playground
+
 KUBEIP_GCP_SA_EMAIL="kubeip-gcp-sa@nviz-playground.iam.gserviceaccount.com"
+```
 
-# Create a Custom IAM Role 
-create a file by name kubeip-custom-role.yaml and add following permissions:
+---
 
+## 5. Create Custom IAM Role
+
+Create a file named `kubeip-custom-role.yaml`:
+
+```yaml
 title: "KubeIP Role"
 description: "KubeIP required permissions for GCP API calls"
 stage: "GA"
@@ -79,23 +108,27 @@ includedPermissions:
   - compute.zoneOperations.list
   - compute.subnetworks.useExternalIp
   - compute.projects.get
+```
 
-Then run following command:
-gcloud iam roles create kubeip_role --project nviz-playground \
-  --file=kubeip-custom-role.yaml || \
-gcloud iam roles update kubeip_role --project nviz-playground \
-  --file=kubeip-custom-role.yaml
+Create or update the role:
 
-# Bind the Custom Role to Your New GCP Service Account:
+```bash
+gcloud iam roles create kubeip_role --project nviz-playground   --file=kubeip-custom-role.yaml || gcloud iam roles update kubeip_role --project nviz-playground   --file=kubeip-custom-role.yaml
+```
 
-gcloud projects add-iam-policy-binding nviz-playground \
-  --member="serviceAccount:$KUBEIP_GCP_SA_EMAIL" \
-  --role="projects/nviz-playground/roles/kubeip_role"
+Bind the role:
 
-# Create Kubernetes Service Account and Bind to GCP SA via Workload Identity:
+```bash
+gcloud projects add-iam-policy-binding nviz-playground   --member="serviceAccount:$KUBEIP_GCP_SA_EMAIL"   --role="projects/nviz-playground/roles/kubeip_role"
+```
 
-create file by name kubeip-workload-identity-rbac.yaml and add following:
+---
 
+## 6. Create Kubernetes Service Account and RBAC
+
+Create a file named `kubeip-workload-identity-rbac.yaml`:
+
+```yaml
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -103,7 +136,6 @@ metadata:
   name: kubeip-service-account
   namespace: kube-system
   annotations:
-        # This annotation links the K8s SA to the GCP SA for Workload Identity
     iam.gke.io/gcp-service-account: kubeip-gcp-sa@nviz-playground.iam.gserviceaccount.com
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -111,9 +143,9 @@ kind: ClusterRole
 metadata:
   name: kubeip-cluster-role
 rules:
-  - apiGroups: [ "" ] # Core API group for nodes
+  - apiGroups: [ "" ]
     resources: [ "nodes" ]
-    verbs: [ "get" ] # KubeIP needs to get node info
+    verbs: [ "get" ]
   - apiGroups: [ "coordination.k8s.io" ] 
     resources: [ "leases" ]
     verbs: [ "create", "get", "delete" ] 
@@ -131,39 +163,74 @@ subjects:
     namespace: kube-system
 roleRef:
   kind: ClusterRole
-  name: kubeip-cluster-role # Refers to the ClusterRole defined above
+  name: kubeip-cluster-role
   apiGroup: rbac.authorization.k8s.io
+```
 
-Then apply the file: kubectl apply -f kubeip-workload-identity-rbac.yaml
+Apply it:
 
-# Bind Workload Identity User Role to the GCP Service Account: 
+```bash
+kubectl apply -f kubeip-workload-identity-rbac.yaml
+```
 
-gcloud iam service-accounts add-iam-policy-binding \
-  $KUBEIP_GCP_SA_EMAIL \
-  --member="serviceAccount:nviz-playground.svc.id.goog[kube-system/kubeip-service-account]" \
-  --role="roles/iam.workloadIdentityUser"
+Bind Workload Identity:
 
-# GKE Node Pool Configuration (Labeling)
-
-gcloud container node-pools update kubeip-pool \
-  --cluster test \
-  --zone asia-south1-c \
-  --node-labels=nodegroup=public,kubeip=use
-
-# Verify New Node Labels:
-
-kubectl get nodes gke-test-kubeip-pool-fe8d653c-sm5w -o yaml | grep -E "nodegroup|kubeip"
-
-we should see output similar to:
-
-nodegroup: "public"
-kubeip: "use"
-
-# Deploy KubeIP DaemonSet:
-
-create file by name kubeip-ds.yaml add following:
+```bash
+gcloud iam service-accounts add-iam-policy-binding   $KUBEIP_GCP_SA_EMAIL   --member="serviceAccount:nviz-playground.svc.id.goog[kube-system/kubeip-service-account]"   --role="roles/iam.workloadIdentityUser"
+```
 
 ---
+
+## 7. Configure Node Pool
+
+Add node labels:
+
+```bash
+gcloud container node-pools update kubeip-pool   --cluster test   --zone asia-south1-c   --node-labels=nodegroup=public,kubeip=use
+```
+
+Verify:
+
+```bash
+kubectl get nodes gke-test-kubeip-pool-fe8d653c-sm5w -o yaml | grep -E "nodegroup|kubeip"
+```
+
+Expected output:
+
+```yaml
+nodegroup: "public"
+kubeip: "use"
+```
+
+---
+
+## 8. Apply Node Taint
+
+Effect: `NO_SCHEDULE`  
+Key: `kubeip.com/not-ready`  
+Value: `true`
+
+Update toleration in konnectivity agent:
+
+```bash
+kubectl edit deploy konnectivity-agent -n kube-system
+```
+
+Add toleration:
+
+```yaml
+- key: "kubeip.com/not-ready"
+  operator: "Exists"
+  effect: "NoSchedule"
+```
+
+---
+
+## 9. Deploy KubeIP DaemonSet
+
+Create `kubeip-ds.yaml`:
+
+```yaml
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -211,71 +278,65 @@ spec:
             - name: LOG_JSON
               value: "true"
             - name: TAINT_KEY
-              value: "kubeip.com/not-ready" 
-            - name: IPV6
-              value: "true"
+              value: "kubeip.com/not-ready"
           securityContext:
             privileged: false
             allowPrivilegeEscalation: false
             capabilities:
-              drop:
-                - ALL
+              drop: [ "ALL" ]
             readOnlyRootFilesystem: true
           resources:
             requests:
               cpu: "100m"
+```
 
+Apply it:
+
+```bash
 kubectl apply -f kubeip-ds.yaml
+kubectl get daemonset kubeip -n kube-system
+kubectl get pods -n kube-system -l app=kubeip -o wide
+kubectl logs <pod-name> -n kube-system
+```
 
-kubectl get daemonset kubeip-agent -n kube-system
+> Expected log message:  
+> `"Successfully assigned static public IP address to node"`
 
-kubectl get pods -n kube-system -l app=kubeip -o wide 
+---
 
-kubectl logs podname -n kubesystem > In output we should see following msg
+## 10. Verify IP Assignment
 
-"msg":"Successfully assigned static public IP address to node" or "msg":"Successfully assigned IP..."
-
-# Verify External IP Assignment on the Node:
-
+```bash
 kubectl get nodes -o wide
+```
 
-# Scale Your Node Pool to 2 Nodes:
+Scale the node pool to 2 nodes:
 
-gcloud container clusters resize test \
-  --node-pool kubeip-pool \
-  --num-nodes 2 \
-  --zone asia-south1-a
+```bash
+gcloud container clusters resize test   --node-pool kubeip-pool   --num-nodes 2   --zone asia-south1-a
+```
 
-# After this the kubeip-agent pod will get deployed and it will assign the 2nd public ip as present.
+The second node should be assigned the second static public IP.
 
-gcloud compute addresses delete kubeip-node-1 \
-  --region=asia-south1
+---
 
+## 11. Cleanup
 
-# TO find out which type of cluster autoscaler present
-gcloud container clusters describe n7-playground-cluster   --zone asia-south1-c   --format="yaml" | yq '.autoscaling'
+Delete a static IP:
 
-# Update the autoscaling profile to balance as for cluster-optimised it will not work
-gcloud container clusters update kubeip-cluster \
-  --zone asia-south1-c \
-  --autoscaling-profile balanced
+```bash
+gcloud compute addresses delete kubeip-node-1 --region=asia-south1
+```
 
-# If we are using taint then we have to follow following steps:
+---
 
-k edit deploy kube-dns  -n kube-system
+## 12. Debugging
 
-then add the following toleration
+Login to node and check logs:
 
-tolerations:
-      - key: "kubeip.com/not-ready"
-        operator: "Exists"
-        effect: "NoSchedule" 
-
-# To login into the node and check the logs of kubeip use following commands:
-gcloud compute ssh gke-kubeip-cluster-default-pool-2356a61a-jqs7 \
-  --zone asia-south1-a
+```bash
+gcloud compute ssh gke-kubeip-cluster-default-pool-2356a61a-jqs7   --zone asia-south1-a
 
 sudo crictl ps -a | grep kubeip
-
-sudo crictl logs a4398ad5518a7
-
+sudo crictl logs <container-id>
+```
