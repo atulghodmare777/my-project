@@ -1,24 +1,33 @@
-For bitbucket
-GO to workspace setting in the bitbucket
-Then click on OAuth consumers
-Then add consumer
-Then provide the callback url: https://35-244-2-22.nip.io/authorize
-No need to add the url in thi
-Then provide the permissions as follows:
-Account: Email, Read
+# Woodpecker Deployment with Bitbucket
 
-✔️ Workspace membership: Read
+## Bitbucket OAuth Configuration
+1. Go to **Workspace settings** in Bitbucket.  
+2. Click on **OAuth consumers** → **Add consumer**.  
+3. Provide the **Callback URL**:  
+   ```
+   https://35-244-2-22.nip.io/authorize
+   ```
+   > **Note:** No need to add the URL elsewhere.
+4. Provide the following permissions:
+   - **Account**: Email, Read  
+   - **Workspace membership**: Read  
+   - **Projects**: Read  
+   - **Repositories**: Read  
+   - **Pull requests**: Read  
+   - **Webhooks**: Read + Write  
 
-✔️ Projects: Read
+5. Save. Once saved, hover over the name to get the **Key** and **Secret**.  
 
-✔️ Repositories: Read
+---
 
-✔️ Pull requests: Read
+## Create Agent Secret
+Generate the agent secret:
+```bash
+openssl rand -hex 32
+```
 
-✔️ Webhooks: Read + Write
-
-Then save once save we have to hower over the name we get the key and secret that we have paste in below
-
+Create Kubernetes secret:
+```bash
 kubectl -n woodpecker-new create secret generic woodpecker-secrets \
   --from-literal=WOODPECKER_BITBUCKET=true \
   --from-literal=WOODPECKER_BITBUCKET_CLIENT='Lpcgt6kKXkBvVVwVm9' \
@@ -26,8 +35,12 @@ kubectl -n woodpecker-new create secret generic woodpecker-secrets \
   --from-literal=WOODPECKER_AGENT_SECRET='b823c06dc553b0bc09e808adfc6c3a91' \
   --from-literal=WOODPECKER_HOST='https://35-244-2-22.nip.io' \
   --dry-run=client -o yaml | kubectl apply -f -
+```
 
-Create values.yaml
+---
+
+## Create `values.yaml`
+```yaml
 server:
   enabled: true
   extraSecretNamesForEnvFrom:
@@ -53,32 +66,55 @@ agent:
     WOODPECKER_BACKEND_K8S_STORAGE_CLASS: "standard-rwo"
     WOODPECKER_BACKEND_K8S_VOLUME_SIZE: "1G"
     WOODPECKER_BACKEND_K8S_STORAGE_RWX: "false"
+```
 
-# Deploy woodpecker
+---
+
+## Deploy Woodpecker
+```bash
 helm install woodpecker oci://ghcr.io/woodpecker-ci/helm/woodpecker \
   -n woodpecker \
   --version 3.3.0 \
   -f values.yaml
+```
 
-# Then modify the sts
+---
+
+## Modify StatefulSet
+Edit the StatefulSet:
+```bash
 kubectl -n woodpecker-new edit statefulset woodpecker-new-server
+```
 
-add the host 
+Add:
+```yaml
 - name: WOODPECKER_HOST
   value: "https://35-244-2-22.nip.io"
+```
 
-# Then using the cert manager create the host "https://35-244-2-22.nip.io" & deploy the ingress follow following steps:
+---
 
-# deploy ingress controller if not deployed already in the cluster we can check by following command:
+## Configure Ingress and Certificates
+
+### 1. Check Ingress Controller
+```bash
 kubectl get pods -A | grep nginx
+```
 
-# Install cert-manager if not already installed:
-k get po -n cert-manager
+### 2. Install Cert-Manager
+Check if cert-manager is installed:
+```bash
+kubectl get pods -n cert-manager
+```
 
+If not, install:
+```bash
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.1/cert-manager.yaml
+```
 
-#Create an Issuer (Let’s Encrypt)
-vi issuer.yaml
+### 3. Create Issuer
+Create `issuer.yaml`:
+```yaml
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
@@ -93,10 +129,16 @@ spec:
     - http01:
         ingress:
           class: nginx
+```
 
-# Deploy an Ingress for Woodpecker
-vi ingress.yaml ( after deploy change the hosts to new load balancer ip)
+Apply it:
+```bash
+kubectl apply -f issuer.yaml
+```
 
+### 4. Create Ingress
+Create `ingress.yaml` (update hosts to new LoadBalancer IP):
+```yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -121,4 +163,9 @@ spec:
             name: woodpecker-new-server
             port:
               number: 80
+```
 
+Apply it:
+```bash
+kubectl apply -f ingress.yaml
+```
