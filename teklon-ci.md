@@ -339,4 +339,70 @@ clustertriggerbindings.triggers.tekton.dev is forbidden
 cannot list resource "clusterinterceptors" in API group "triggers.tekton.dev"
 cannot list resource "triggers" in API group "triggers.tekton.dev"
 
+# Option 1: Install tkn CLI 
+# Download latest release (Linux AMD64)
+curl -LO https://github.com/tektoncd/cli/releases/download/v0.36.0/tkn_0.36.0_Linux_x86_64.tar.gz
+
+# Extract
+tar xvzf tkn_0.36.0_Linux_x86_64.tar.gz
+
+# Move binary to PATH
+sudo mv tkn /usr/local/bin/
+
+# Verify
+tkn version
+
+# authentication with bitbucket
+create the token in bitbucket with read scope and copy paste the username and password
+
+# Then create the secret in the cluster
+vi bitbucket-secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bitbucket-token-secret
+  namespace: tekton-pipelines
+  annotations:
+    tekton.dev/git-0: https://bitbucket.org
+type: kubernetes.io/basic-auth
+stringData:
+  username: "atulghodmare1"   # <-- replace with your Bitbucket email/username
+  password: "ATATT3xFfGF097irOg8mpB4zxXg7IivROw1KAywAtJpa3XIFNExJRotswd1n-LVHGCuMJdydb_qxGK4xsL7R8zFrGGzsYH2ueatjeiY2u0fdMzlwKCMX5DllzU_HN3TLrlgRazPrfhNasOPrrOLMfMTYH3GmxtGwHh1iC0FPMe4FDJsK6YZRaH4=5B2D81D8"   # <-- replace with your Bitbucket App password / API token
+
+Apply the secret 
+
+# Patch your ServiceAccount to use this secret which we have created above with secret field:
+vi kaniko-sa-patch.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kaniko-sa
+  namespace: tekton-pipelines
+secrets:
+  - name: bitbucket-token-secret
+
+# create the test pipeline
+vi test-pipeline.yaml
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  generateName: build-push-run-
+  namespace: tekton-pipelines
+spec:
+  serviceAccountName: kaniko-sa
+  pipelineRef:
+    name: build-push-pipeline
+  params:
+    - name: gitrepositoryurl
+      value: https://bitbucket.org/woodpeckernew/test.git   # ✅ remove username@ prefix
+    - name: gitrevision
+      value: main
+    - name: image
+      value: asia-south1-c-docker.pkg.dev/teklon/test/test-image:latest
+  workspaces:
+    - name: shared-data
+      emptyDir: {}
+
+tkn pipelinerun list -n tekton-pipelines
+tkn pipelinerun logs -f build-push-run-bw7zd -n tekton-pipelines
 
