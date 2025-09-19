@@ -296,19 +296,47 @@ Trigger: Push
 
 Why: This is the actual trigger connection — Bitbucket → Tekton.
 
-Step 9 — Test everything
-Push a commit to Bitbucket. Then:
+# Create the tekton-triggers-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tekton-triggers-admin
+rules:
+  - apiGroups: ["triggers.tekton.dev"]
+    resources:
+      - eventlisteners
+      - triggerbindings
+      - triggertemplates
+      - clustertriggerbindings
+      - interceptors
+      - clusterinterceptors    
+      - triggers               
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  - apiGroups: ["tekton.dev"]
+    resources: ["pipelineruns", "pipelineresources", "taskruns"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets", "serviceaccounts", "services", "pods", "events"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tekton-triggers-admin-binding
+subjects:
+  - kind: ServiceAccount
+    name: tekton-triggers-sa
+    namespace: tekton-pipelines
+roleRef:
+  kind: ClusterRole
+  name: tekton-triggers-admin
+  apiGroup: rbac.authorization.k8s.io
 
-kubectl get pipelineruns -n tekton-pipelines --watch
+This will make sure el-bb-listener po in teklon-pipelines namespace is running fine as it will through an error that permissions are missing for following
+eventlisteners.triggers.tekton.dev is forbidden
+triggerbindings.triggers.tekton.dev is forbidden
+clustertriggerbindings.triggers.tekton.dev is forbidden
+cannot list resource "clusterinterceptors" in API group "triggers.tekton.dev"
+cannot list resource "triggers" in API group "triggers.tekton.dev"
 
-You should see a new PipelineRun created. Check logs:
 
-tkn pr logs -f -n tekton-pipelines <pipelinerun-name>
-
-Or visit Dashboard: http://tekton.34-123-45-67.nip.io
-
-You should see:
-
-clone task runs → repo is cloned.
-
-build task runs → Kaniko builds and pushes image to Artifact Registry.
