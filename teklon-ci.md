@@ -89,143 +89,6 @@ kubectl annotate serviceaccount ${KSA} -n ${KSA_NS} \
 
 Why: Workload Identity = secure, keyless authentication. Kaniko pods running with kaniko-sa can now push images to Artifact Registry.
 
-Step 5 — Define Pipeline (clone + Kaniko build & push)
-
-Save as pipeline-build-push.yaml.
-apiVersion: tekton.dev/v1beta1
-kind: Pipeline
-metadata:
-  name: build-push-pipeline
-  namespace: tekton-pipelines
-spec:
-  params:
-    - name: gitrepositoryurl
-      type: string
-    - name: gitrevision
-      type: string
-      default: "main"
-    - name: image
-      type: string
-  workspaces:
-    - name: shared-data
-  tasks:
-    - name: clone
-      taskSpec:
-        params:
-          - name: url
-          - name: revision
-            default: "main"
-        workspaces:
-          - name: output
-        steps:
-          - name: git-clone
-            image: alpine/git
-            script: |
-              #!/bin/sh
-              git clone --depth 1 --branch $(params.revision) $(params.url) $(workspaces.output.path)/source
-      params:
-        - name: url
-          value: $(params.gitrepositoryurl)
-        - name: revision
-          value: $(params.gitrevision)
-      workspaces:
-        - name: output
-          workspace: shared-data
-    - name: build
-      runAfter: [clone]
-      taskSpec:
-        params:
-          - name: IMAGE
-        workspaces:
-          - name: source
-        steps:
-          - name: kaniko
-            image: gcr.io/kaniko-project/executor:latest
-            args:
-              - "--context=$(workspaces.source.path)/source"
-              - "--dockerfile=$(workspaces.source.path)/source/Dockerfile"
-              - "--destination=$(params.IMAGE)"
-      params:
-        - name: IMAGE
-          value: $(params.image)
-      workspaces:
-        - name: source
-          workspace: shared-data
-
-kubectl apply -f pipeline-build-push.yaml
-
-Why: This pipeline clones your Bitbucket repo, then builds and pushes its Dockerfile image using Kaniko.
-
-Step 6 — Create Triggers
-
-Triggers wire Bitbucket webhooks to PipelineRuns. Save as triggers-bitbucket.yaml.
-
-apiVersion: triggers.tekton.dev/v1beta1
-kind: TriggerBinding
-metadata:
-  name: bb-binding
-  namespace: tekton-pipelines
-spec:
-  params:
-    - name: gitrevision
-      value: $(body.push.changes[0].new.name)
-    - name: gitrepositoryurl
-      value: $(body.repository.links.html.href)
----
-apiVersion: triggers.tekton.dev/v1beta1
-kind: TriggerTemplate
-metadata:
-  name: bb-template
-  namespace: tekton-pipelines
-spec:
-  params:
-    - name: gitrevision
-    - name: gitrepositoryurl
-    - name: image
-  resourcetemplates:
-    - apiVersion: tekton.dev/v1beta1
-      kind: PipelineRun
-      metadata:
-        generateName: bb-run-
-      spec:
-        serviceAccountName: kaniko-sa
-        pipelineRef:
-          name: build-push-pipeline
-        params:
-          - name: gitrepositoryurl
-            value: $(tt.params.gitrepositoryurl)
-          - name: gitrevision
-            value: $(tt.params.gitrevision)
-          - name: image
-            value: $(tt.params.image)
-        workspaces:
-          - name: shared-data
-            emptyDir: {}
----
-apiVersion: triggers.tekton.dev/v1beta1
-kind: EventListener
-metadata:
-  name: bb-listener
-  namespace: tekton-pipelines
-spec:
-  serviceAccountName: tekton-triggers-sa
-  triggers:
-    - name: on-bitbucket-push
-      bindings:
-        - ref: bb-binding
-      template:
-        ref: bb-template
-
-kubectl apply -f triggers-bitbucket.yaml
-
-Why:
-
-Binding extracts branch + repo from Bitbucket webhook payload.
-
-Template creates a PipelineRun that calls your pipeline.
-
-EventListener exposes a service for Bitbucket to call.
-
 Step 7 — Expose EventListener + Dashboard
 
 Get ingress IP:
@@ -286,16 +149,6 @@ kubectl apply -f dashboard-ingress.yaml
 
 Why: This makes Tekton UI available at one hostname and EventListener reachable by Bitbucket webhook at another.
 
-Step 8 — Add webhook in Bitbucket
-
-Go to Repo settings → Webhooks → Add webhook.
-
-URL: http://bb.34-123-45-67.nip.io/
-
-Trigger: Push
-
-Why: This is the actual trigger connection — Bitbucket → Tekton.
-
 # Create the tekton-triggers-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -353,56 +206,142 @@ sudo mv tkn /usr/local/bin/
 tkn version
 
 # authentication with bitbucket
-create the token in bitbucket with read scope and copy paste the username and password
+We can do it by ssh
+ssh-keygen -t ed25519 -C "tekton-bot" -f ./tekton-ssh-key -N ""
+ssh -i ./tekton-ssh-key git@bitbucket.org
+ssh-keyscan bitbucket.org > known_hosts
+mv ./tekton-ssh-key ~/.ssh/
+mv ./tekton-ssh-key.pub ~/.ssh/
+chmod 600 ~/.ssh/tekton-ssh-key
+chmod 644 ~/.ssh/tekton-ssh-key.pub
 
+encode the private key and known host and config and paste in the secret.yaml
 # Then create the secret in the cluster
 vi bitbucket-secret.yaml
 apiVersion: v1
 kind: Secret
 metadata:
-  name: bitbucket-token-secret
+  name: git-credentials
   namespace: tekton-pipelines
-  annotations:
-    tekton.dev/git-0: https://bitbucket.org
-type: kubernetes.io/basic-auth
-stringData:
-  username: "atulghodmare1"   # <-- replace with your Bitbucket email/username
-  password: "ATATT3xFfGF097irOg8mpB4zxXg7IivROw1KAywAtJpa3XIFNExJRotswd1n-LVHGCuMJdydb_qxGK4xsL7R8zFrGGzsYH2ueatjeiY2u0fdMzlwKCMX5DllzU_HN3TLrlgRazPrfhNasOPrrOLMfMTYH3GmxtGwHh1iC0FPMe4FDJsK6YZRaH4=5B2D81D8"   # <-- replace with your Bitbucket App password / API token
+data:
+  tekton-ssh-key: LS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0KYjNCbGJuTnphQzFyWlhrdGRqRUFBQUFBQkc1dmJtVUFBQUFFYm05dVpRQUFBQUFBQUFBQkFBQUFNd0FBQUF0emMyZ3RaVwpReU5UVXhPUUFBQUNEcjM1U3NmSm43azFOL1hkYjJRa1U4OHl2anhaNkxSam0zemxNdE9VeU1zQUFBQUpDUU5BRXdrRFFCCk1BQUFBQXR6YzJndFpXUXlOVFV4T1FBQUFDRHIzNVNzZkpuN2sxTi9YZGIyUWtVODh5dmp4WjZMUmptM3psTXRPVXlNc0EKQUFBRUFxRDFtY0EzbGRRM0hodXlwYWduMFFSOUNvWnlJY3pFdVdzMDlzaDFtZGZldmZsS3g4bWZ1VFUzOWQxdlpDUlR6egpLK1BGbm90R09iZk9VeTA1VEl5d0FBQUFDblJsYTNSdmJpMWliM1FCQWdNPQotLS0tLUVORCBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0K 
+  known_hosts: fDF8b2lLVGk3TytocnVkOTk2VTQxWUZjTDlqQzBnPXxuLzNNMFVCQlZtV1RSRDAzNi9jclF3aTJqZ0E9IHNzaC1lZDI1NTE5IEFBQUFDM056YUMxbFpESTFOVEU1QUFBQUlJYXpFdTg5d2dRWjRicXMzZDYzUVNNellWYTBNdUoyZTJnS1RLcXUrVVVPCnwxfEJwWkFKRnZLUW43OGRpYWlDVllCZFhyRE9Kbz18dXlnMHBqRy81d1IraUh1Wm9wbjVsVDhzVDh3PSBlY2RzYS1zaGEyLW5pc3RwMjU2IEFBQUFFMlZqWkhOaExYTm9ZVEl0Ym1semRIQXlOVFlBQUFBSWJtbHpkSEF5TlRZQUFBQkJCUElRbXV6TUJ1S2RXZUY0K2Eyc2pTU3BCSzBpcWl0U1ErNUJNOUtocGV4dUd0MjBKcFRWTTd1NUJEWm5nbmNncnFETWJXZHhNV1dPR3RaOVVnYnFnWkU9CnwxfHpmU0dkU1RGSENGUFlkNE5VTDJFUzV0SVcwUT18cWQ0QUI1a3VnY2JvaFV1MzdDdDl1N1JOb1prPSBzc2gtcnNhIEFBQUFCM056YUMxeWMyRUFBQUFEQVFBQkFBQUJnUURRZUp6aHVwUnUwdTBjZGVnWklhOGU4NkVHMnFPQ3NJc0QxWHcweFNlaVBEbENyN2txOTdOTG1NYnBLVFg2RXNjMzBOdW9xRUVIQ3VjN3lXdHdwOGRJNzZFRUVCMVZxWTlRSnE2dmsrYXlTeWJvRDVRRjYxSS8xV2VUd3UrZGVDYmdLTUdiVWlqZVhodGZieFN4bTZKd0dyWHJoQmRvZlRzYktSVXNyTjFXb05nVWE4dXFOMVZ4NldBSncxSkhQaGdsRUdHSGVhNlFJQ3dKT0FyLzZtcnVpL29CN3BrYVdLSGozejdkMUlDNEtXTHRZNDdlbHZqYmFUbGtOMDRLYy81TEZFaXJvckdZVmJ0MTVrQVVscUdNNjVwazZaQnh0YU8zKzMwTFZsT1Jaa3hPaCtMS0wvQnZiWi9pUk5oSXRMcU55aWVvUWovdWgvN0l2NHV5SC9jVi8wYjRXRFNkM0RwdGlnV3E4NGxKdWJiOXQvRG5abHJKYXp4eURDdWxUbUtkT1I3dnM5Z01Ubyt1b0lyUFNiOFNjVHR2dzY1K29kS0FsQmo1OWRoblZwOXpkN1FVb2pPcFhsTDYyQXc1NlU0b08rRkFMdWV2dk1qaVdlYXZLaEpxbFI3aTVuOXNyWWNyTlY3dHRtRHc3a2YvOTdQNXphdUloeGNqWCt4SHY0TT0K  
+  config: SG9zdCBiaXRidWNrZXQub3JnCiAgVXNlciBnaXQKICBJZGVudGl0eUZpbGUgfi8uc3NoL3Rla3Rvbi1zc2gta2V5
 
 Apply the secret 
 
-# Patch your ServiceAccount to use this secret which we have created above with secret field:
-vi kaniko-sa-patch.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: kaniko-sa
-  namespace: tekton-pipelines
-secrets:
-  - name: bitbucket-token-secret
-
 # create the test pipeline
-vi test-pipeline.yaml
+vi pipeline.yaml
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: clone-read
+  namespace: tekton-pipelines
+spec:
+  description: | 
+    This pipeline clones a git repo, then echoes the README file to the stout.
+  params:
+  - name: repo-url
+    type: string
+    description: The git repo URL to clone from.
+  workspaces:
+  - name: shared-data
+    description: | 
+      This workspace contains the cloned repo files, so they can be read by the
+      next task.
+  - name: git-credentials
+    description: My ssh credentials
+  tasks:
+  - name: fetch-source
+    taskRef:
+      name: git-clone
+    workspaces:
+    - name: output
+      workspace: shared-data
+    - name: ssh-directory
+      workspace: git-credentials
+    params:
+    - name: url
+      value: $(params.repo-url)
+  - name: show-readme
+    runAfter: ["fetch-source"]
+    taskRef:
+      name: show-readme
+    workspaces:
+    - name: source
+      workspace: shared-data
+
+# create pipelinerun
+vi pipelinerun.yaml
 apiVersion: tekton.dev/v1beta1
 kind: PipelineRun
 metadata:
-  generateName: build-push-run-
+  generateName: clone-read-run-
   namespace: tekton-pipelines
 spec:
-  serviceAccountName: kaniko-sa
   pipelineRef:
-    name: build-push-pipeline
-  params:
-    - name: gitrepositoryurl
-      value: https://bitbucket.org/woodpeckernew/test.git   # ✅ remove username@ prefix
-    - name: gitrevision
-      value: main
-    - name: image
-      value: asia-south1-c-docker.pkg.dev/teklon/test/test-image:latest
+    name: clone-read
+  podTemplate:
+    securityContext:
+      fsGroup: 65532
   workspaces:
-    - name: shared-data
-      emptyDir: {}
+  - name: shared-data
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+  - name: git-credentials
+    secret:
+      secretName: git-credentials
+  params:
+  - name: repo-url
+    value: git@bitbucket.org:woodpeckernew/test.git
 
+# Create task of read readme file
+vi readme.yaml
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: show-readme
+  namespace: tekton-pipelines
+spec:
+  description: Read and display README file.
+  workspaces:
+  - name: source
+  steps:
+  - name: read
+    image: alpine:latest
+    script: | 
+      #!/usr/bin/env sh
+      cat $(workspaces.source.path)/README.md
+
+# How to run
+To use the git clone Task in your pipeline, you have to install it on your cluster first. You can do this with the tkn command:
+tkn hub install task git-clone -n tekton-pipelines
+OR
+kubectl apply -f \
+https://raw.githubusercontent.com/tektoncd/catalog/main/task/git-clone/0.6/git-clone.yaml
+
+Apply the show-readme Task:
+kubectl apply -f show-readme.yaml
+
+Apply the Pipeline:
+kubectl apply -f pipeline.yaml
+
+Create the PipelineRun:
+kubectl create -f pipelinerun.yaml
+
+This creates a PipelineRun with a unique name each time:
+pipelinerun.tekton.dev/clone-read-run-4kgjr created
+
+Use the PipelineRun name from the output of the previous step to monitor the Pipeline execution:
 tkn pipelinerun list -n tekton-pipelines
 tkn pipelinerun logs -f build-push-run-bw7zd -n tekton-pipelines
+
+After this we can check the pods in the tekton-pipelines namespace
+
+s
 
