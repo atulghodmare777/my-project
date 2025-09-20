@@ -271,7 +271,7 @@ spec:
     - name: source
       workspace: shared-data
 
-# create pipelinerun
+# create pipelinerun [ reference taken for this cloning is from official docs https://tekton.dev/docs/how-to-guides/clone-repository/ ]
 vi pipelinerun.yaml
 apiVersion: tekton.dev/v1beta1
 kind: PipelineRun
