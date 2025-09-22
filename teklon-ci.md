@@ -215,6 +215,15 @@ mv ./tekton-ssh-key.pub ~/.ssh/
 chmod 600 ~/.ssh/tekton-ssh-key
 chmod 644 ~/.ssh/tekton-ssh-key.pub
 
+# paste the public key in bitbucket ssh keys
+check authentication success or not using following command
+ssh -T git@bitbucket.org
+
+create config file in .ssh loaction and add following :
+Host bitbucket.org
+  User git
+  IdentityFile ~/.ssh/tekton-ssh-key
+  
 encode the private key and known host and config and paste in the secret.yaml
 # Then create the secret in the cluster
 vi bitbucket-secret.yaml
