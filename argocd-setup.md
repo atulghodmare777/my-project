@@ -1,5 +1,21 @@
 First deploy nginx controller and cert manager in the cluster
-Then create the values file to deploy the argocd using helm
+Create issuer file which will be used in the ingress configuration as we dont have domain
+vi issuer.yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    email: "atul.ghodmare@nviz.com"
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      - http01:
+          ingress:
+            class: nginx
+# create the values file to deploy the argocd using helm
 vi argocd-values.yaml
 # argocd-values.yaml
 global:
