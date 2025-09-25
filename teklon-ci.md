@@ -38,56 +38,6 @@ kubectl get pods -n tekton-pipelines --watch
 
 Why: Profile all ensures you get Pipelines (to run CI), Triggers (to respond to webhooks), Dashboard (to view runs).
 
-ServiceAccounts & Workload Identity
-
-We need two Kubernetes ServiceAccounts:
-
-tekton-triggers-sa: lets EventListener create PipelineRuns.
-
-kaniko-sa: runs Kaniko with a Google Service Account (GSA) bound via Workload Identity.
-
-kubectl create ns tekton-pipelines || true
-
-kubectl apply -f - <<'YAML'
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: tekton-triggers-sa
-  namespace: tekton-pipelines
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: kaniko-sa
-  namespace: tekton-pipelines
-YAML
-
-
-Now create and bind the GSA:
-PROJECT=your-gcp-project
-GSA=tekton-kaniko-gsa
-KSA=kaniko-sa
-KSA_NS=tekton-pipelines
-
-# Create GSA
-gcloud iam service-accounts create $GSA --project $PROJECT
-
-# Give permission to push images
-gcloud projects add-iam-policy-binding $PROJECT \
-  --member="serviceAccount:${GSA}@${PROJECT}.iam.gserviceaccount.com" \
-  --role="roles/artifactregistry.writer"
-
-# Bind GSA to KSA
-gcloud iam service-accounts add-iam-policy-binding \
-  ${GSA}@${PROJECT}.iam.gserviceaccount.com \
-  --member="serviceAccount:${PROJECT}.svc.id.goog[${KSA_NS}/${KSA}]" \
-  --role="roles/iam.workloadIdentityUser"
-
-# Annotate the KSA
-kubectl annotate serviceaccount ${KSA} -n ${KSA_NS} \
-  iam.gke.io/gcp-service-account=${GSA}@${PROJECT}.iam.gserviceaccount.com
-
-Why: Workload Identity = secure, keyless authentication. Kaniko pods running with kaniko-sa can now push images to Artifact Registry.
 
 Step 7 — Expose EventListener + Dashboard
 
@@ -149,48 +99,7 @@ kubectl apply -f dashboard-ingress.yaml
 
 Why: This makes Tekton UI available at one hostname and EventListener reachable by Bitbucket webhook at another.
 
-# Create the tekton-triggers-rbac.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: tekton-triggers-admin
-rules:
-  - apiGroups: ["triggers.tekton.dev"]
-    resources:
-      - eventlisteners
-      - triggerbindings
-      - triggertemplates
-      - clustertriggerbindings
-      - interceptors
-      - clusterinterceptors    
-      - triggers               
-    verbs: ["get", "list", "watch", "create", "update", "delete"]
-  - apiGroups: ["tekton.dev"]
-    resources: ["pipelineruns", "pipelineresources", "taskruns"]
-    verbs: ["get", "list", "watch", "create", "update", "delete"]
-  - apiGroups: [""]
-    resources: ["configmaps", "secrets", "serviceaccounts", "services", "pods", "events"]
-    verbs: ["get", "list", "watch", "create", "update", "delete"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: tekton-triggers-admin-binding
-subjects:
-  - kind: ServiceAccount
-    name: tekton-triggers-sa
-    namespace: tekton-pipelines
-roleRef:
-  kind: ClusterRole
-  name: tekton-triggers-admin
-  apiGroup: rbac.authorization.k8s.io
 
-This will make sure el-bb-listener po in teklon-pipelines namespace is running fine as it will through an error that permissions are missing for following
-eventlisteners.triggers.tekton.dev is forbidden
-triggerbindings.triggers.tekton.dev is forbidden
-clustertriggerbindings.triggers.tekton.dev is forbidden
-cannot list resource "clusterinterceptors" in API group "triggers.tekton.dev"
-cannot list resource "triggers" in API group "triggers.tekton.dev"
 
 # Option 1: Install tkn CLI 
 # Download latest release (Linux AMD64)
@@ -348,9 +257,143 @@ pipelinerun.tekton.dev/clone-read-run-4kgjr created
 
 Use the PipelineRun name from the output of the previous step to monitor the Pipeline execution:
 tkn pipelinerun list -n tekton-pipelines
+
+Aove steps will do clone the private repo and then read the readme file from the repo means private clone success
+
+# How to clone and build the application and then push the image to artifact registry
+First we need to create the authentication with artifact registry, follow following steps for gke for other cloud folloe steps from docs:
+Enable the Artifact Registry API:
+To check if it is already enabled : gcloud services list --filter="name:artifactregistry.googleapis.com"
+To enable the service run cmd: gcloud services enable artifactregistry.googleapis.com
+
+Create a Docker repository to push the image to:
+gcloud artifacts repositories create <repository-name> \
+  --repository-format=docker \
+  --location=us-central1 --description="Docker repository"
+
+Create a Kubernetes Service Account:
+kubectl create serviceaccount tekton-sa
+gcloud iam service-accounts create tekton-sa
+gcloud artifacts repositories add-iam-policy-binding zendesk \
+  --location asia-south1 \
+  --member=serviceAccount:tekton-sa@nviz-playground.iam.gserviceaccount.com \
+  --role=roles/artifactregistry.reader \
+  --role=roles/artifactregistry.writer
+
+kubectl annotate serviceaccount \
+tekton-sa \
+iam.gke.io/gcp-service-account=tekton-sa@nviz-playground.iam.gserviceaccount.com \
+-n test
+
+gcloud iam service-accounts add-iam-policy-binding \
+  --role roles/iam.workloadIdentityUser \
+  --member "serviceAccount:nviz-playground.svc.id.goog[test/tekton-sa]" \
+  tekton-sa@nviz-playground.iam.gserviceaccount.com
+
+This creates two service accounts, an IAM service account and a Kubernetes service account, and “links” them. Workload Identity allows workloads in your GKE cluster to impersonate IAM service accounts to access Google Cloud services.
+
+
+
+
+
+
+
+
+
+
+ServiceAccounts & Workload Identity
+
+We need two Kubernetes ServiceAccounts:
+
+tekton-triggers-sa: lets EventListener create PipelineRuns.
+
+kaniko-sa: runs Kaniko with a Google Service Account (GSA) bound via Workload Identity.
+
+kubectl create ns tekton-pipelines || true
+
+kubectl apply -f - <<'YAML'
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tekton-triggers-sa
+  namespace: tekton-pipelines
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kaniko-sa
+  namespace: tekton-pipelines
+YAML
+
 tkn pipelinerun logs -f build-push-run-bw7zd -n tekton-pipelines
 
 After this we can check the pods in the tekton-pipelines namespace
 
-s
+Now create and bind the GSA:
+PROJECT=your-gcp-project
+GSA=tekton-kaniko-gsa
+KSA=kaniko-sa
+KSA_NS=tekton-pipelines
 
+# Create GSA
+gcloud iam service-accounts create $GSA --project $PROJECT
+
+# Give permission to push images
+gcloud projects add-iam-policy-binding $PROJECT \
+  --member="serviceAccount:${GSA}@${PROJECT}.iam.gserviceaccount.com" \
+  --role="roles/artifactregistry.writer"
+
+# Bind GSA to KSA
+gcloud iam service-accounts add-iam-policy-binding \
+  ${GSA}@${PROJECT}.iam.gserviceaccount.com \
+  --member="serviceAccount:${PROJECT}.svc.id.goog[${KSA_NS}/${KSA}]" \
+  --role="roles/iam.workloadIdentityUser"
+
+# Annotate the KSA
+kubectl annotate serviceaccount ${KSA} -n ${KSA_NS} \
+  iam.gke.io/gcp-service-account=${GSA}@${PROJECT}.iam.gserviceaccount.com
+
+Why: Workload Identity = secure, keyless authentication. Kaniko pods running with kaniko-sa can now push images to Artifact Registry.
+
+# Create the tekton-triggers-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tekton-triggers-admin
+rules:
+  - apiGroups: ["triggers.tekton.dev"]
+    resources:
+      - eventlisteners
+      - triggerbindings
+      - triggertemplates
+      - clustertriggerbindings
+      - interceptors
+      - clusterinterceptors    
+      - triggers               
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  - apiGroups: ["tekton.dev"]
+    resources: ["pipelineruns", "pipelineresources", "taskruns"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets", "serviceaccounts", "services", "pods", "events"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tekton-triggers-admin-binding
+subjects:
+  - kind: ServiceAccount
+    name: tekton-triggers-sa
+    namespace: tekton-pipelines
+roleRef:
+  kind: ClusterRole
+  name: tekton-triggers-admin
+  apiGroup: rbac.authorization.k8s.io
+
+This will make sure el-bb-listener po in teklon-pipelines namespace is running fine as it will through an error that permissions are missing for following
+eventlisteners.triggers.tekton.dev is forbidden
+triggerbindings.triggers.tekton.dev is forbidden
+clustertriggerbindings.triggers.tekton.dev is forbidden
+cannot list resource "clusterinterceptors" in API group "triggers.tekton.dev"
+cannot list resource "triggers" in API group "triggers.tekton.dev"
