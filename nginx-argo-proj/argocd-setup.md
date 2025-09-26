@@ -203,4 +203,33 @@ volumes:
       - emptyDir: {}
         name: tmp
 
-    
+  # Create application file
+  vi application.yaml
+  apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nginx-app
+  namespace: argocd
+  annotations:
+    argocd-image-updater.argoproj.io/image-list: nginx=gcr.io/nviz-playground/nginx-app #(Used nginx in this is the alias which we have used in the next annotations)
+    argocd-image-updater.argoproj.io/git-branch: main
+    argocd-image-updater.argoproj.io/nginx.update-strategy: newest-build
+    argocd-image-updater.argoproj.io/nginx.allow-tags: regexp:^.*
+    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/bitbucket-ssh # (we had created the ssh key we have directly used here to authenticate when commiting the kustomization)
+    argocd-image-updater.argoproj.io/write-back-target: kustomization
+spec:
+  project: default
+  source:
+    repoURL: git@bitbucket.org:NvizionSolutions/n7-playground-nginx.git
+    targetRevision: main
+    path: apps/nginx
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+    syncOptions:
+      - ApplyOutOfSyncOnly=true
+
+k apply -f application.yaml ? wait for some time to see the effect
