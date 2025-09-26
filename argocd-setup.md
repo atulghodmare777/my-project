@@ -88,6 +88,7 @@ stringData:
     -----END OPENSSH PRIVATE KEY-----
 
   Apply the secret 
+  Add public key in the ssh section of butbucket 
 
   # Install argocd cli
   VERSION=v3.0.11
@@ -101,4 +102,105 @@ get password: kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpa
 argocd login argocd.35.244.2.22.nip.io --username admin --password 8pXYjTPAoEb-ML8S --insecure
 argocd repo list > you can see the repo is automatically added, you can verify through UI as well
 
+# Deploy image updater
+create values file
+vi argocd-image-updater-values.yaml
+config:
+  argocd:
+    serverAddress: "argocd-server.argocd.svc.cluster.local:443"
+    insecure: true   # because you passed --insecure in server
 
+rbac:
+  enabled: true
+
+serviceAccount:
+  create: true
+  name: argocd-image-updater
+
+helm upgrade --install argocd-image-updater argo/argocd-image-updater   -n argocd -f argocd-image-updater-values.yaml
+
+Edit cm:  k edit cm argocd-image-updater-config -n argocd 
+
+apiVersion: v1
+data:
+  artifact-registry.sh: |
+    #!/bin/sh
+    ACCESS_TOKEN=$(wget --header 'Metadata-Flavor: Google' \
+      http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token \
+      -q -O - | grep -Eo '"access_token":.*?[^\\]",' | cut -d '"' -f 4)
+    echo "oauth2accesstoken:$ACCESS_TOKEN"
+  interval: 1m
+  kube.events: "false"
+  log.level: info
+  registries.conf: |
+    registries:
+    - name: Google Container Registry
+      prefix: gcr.io
+      api_url: https://gcr.io
+      credentials: ext:/app/scripts/artifact-registry.sh
+      defaultns: nviz-playground
+      insecure: no
+      ping: yes
+      credsexpire: 15m
+      default: true
+kind: ConfigMap
+metadata:
+  annotations:
+    meta.helm.sh/release-name: argocd-image-updater
+    meta.helm.sh/release-namespace: argocd
+
+Add this in deployment of image updater as well as volume and volume mount
+k edit deploy argocd-image-updater -n argocd
+volumeMounts:
+        - mountPath: /app/config
+          name: image-updater-conf
+        - mountPath: /app/config/ssh
+          name: ssh-known-hosts
+        - mountPath: /app/.ssh
+          name: ssh-config
+        - mountPath: /tmp
+          name: tmp
+        - mountPath: /app/scripts
+          name: artifact-registry
+        - mountPath: /app/ssh-keys/id_rsa
+          name: ssh-signing-key
+          readOnly: true
+          subPath: sshPrivateKey
+volumes:
+      - configMap:
+          defaultMode: 493
+          items:
+          - key: artifact-registry.sh
+            path: artifact-registry.sh
+          name: argocd-image-updater-config
+          optional: true
+        name: artifact-registry
+      - configMap:
+          defaultMode: 420
+          items:
+          - key: registries.conf
+            path: registries.conf
+          - key: git.commit-message-template
+            path: commit.template
+          name: argocd-image-updater-config
+          optional: true
+        name: image-updater-conf
+      - configMap:
+          defaultMode: 420
+          name: argocd-ssh-known-hosts-cm
+          optional: true
+        name: ssh-known-hosts
+      - configMap:
+          defaultMode: 420
+          name: argocd-image-updater-ssh-config
+          optional: true
+        name: ssh-config
+      - name: ssh-signing-key
+        secret:
+          defaultMode: 420
+          optional: true
+          secretName: ssh-git-creds
+      - emptyDir: {}
+        name: tmp
+
+    
