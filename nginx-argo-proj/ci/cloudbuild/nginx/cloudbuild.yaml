@@ -1,0 +1,15 @@
+steps:
+- name: 'gcr.io/kaniko-project/executor:latest'
+  args:
+    - --destination=gcr.io/nviz-playground/nginx-app:$COMMIT_SHA
+    - --cache=true
+    - --cache-ttl=24h
+
+      #- name: 'gcr.io/cloud-builders/git'
+      #entrypoint: 'bash'
+      #args:
+      #- '-c'
+      #- |
+      #chmod +x update_image.sh
+      #./update_image.sh $COMMIT_SHA
+
