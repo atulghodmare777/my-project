@@ -1,3 +1,11 @@
+Issues faced:
+Cluster level workload identity(WI) was enabled but old nodepool was still running hence automatically only to the new nodepools WI will be enabled but not to the old nodepools hence updated manually the existing nodepool for WI by following command
+
+gcloud container node-pools update nap-e2-standard-4-1lglq719 \
+  --cluster=n7-playground-cluster \
+  --zone=asia-south1-c \
+  --workload-metadata=GKE_METADATA
+  
 Install ingress + cert-manager
 
 Bitbucket webhooks need a public HTTPS endpoint. We install nginx ingress + cert-manager for that.
