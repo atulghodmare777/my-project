@@ -1,4 +1,6 @@
 Issues faced:
+When the pipeline runs with task build and push , push was failing due to permission error as the pod was not assumming the SA which was assinged to it, it was assuming the default SA
+Solution:
 Cluster level workload identity(WI) was enabled but old nodepool was still running hence automatically only to the new nodepools WI will be enabled but not to the old nodepools hence updated manually the existing nodepool for WI by following command
 
 gcloud container node-pools update nap-e2-standard-4-1lglq719 \
