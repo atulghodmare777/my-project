@@ -8,23 +8,7 @@ gcloud container node-pools update nap-e2-standard-4-1lglq719 \
   --zone=asia-south1-c \
   --workload-metadata=GKE_METADATA
   
-Install ingress + cert-manager
 
-Bitbucket webhooks need a public HTTPS endpoint. We install nginx ingress + cert-manager for that.
-
-# Ingress controller
-kubectl create ns ingress-nginx
-helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
-helm repo update
-helm install ingress-nginx ingress-nginx/ingress-nginx -n ingress-nginx
-
-# Cert-manager
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.crds.yaml
-kubectl create ns cert-manager
-helm repo add jetstack https://charts.jetstack.io
-helm repo update
-helm install cert-manager jetstack/cert-manager -n cert-manager
-Why: This lets us expose Tekton EventListener (for Bitbucket) and Tekton Dashboard (for humans).
 
 Install Tekton Operator
 
@@ -48,6 +32,364 @@ kubectl get pods -n tekton-pipelines --watch
 
 Why: Profile all ensures you get Pipelines (to run CI), Triggers (to respond to webhooks), Dashboard (to view runs).
 
+# Option 1: Install tkn CLI 
+# Download latest release (Linux AMD64)
+curl -LO https://github.com/tektoncd/cli/releases/download/v0.36.0/tkn_0.36.0_Linux_x86_64.tar.gz
+
+# Extract
+tar xvzf tkn_0.36.0_Linux_x86_64.tar.gz
+
+# Move binary to PATH
+sudo mv tkn /usr/local/bin/
+
+# Verify
+tkn version
+
+# authentication with bitbucket
+We can do it by ssh
+ssh-keygen -t ed25519 -C "tekton-bot" -f ./tekton-ssh-key -N ""
+ssh -i ./tekton-ssh-key git@bitbucket.org
+ssh-keyscan bitbucket.org > known_hosts
+mv ./tekton-ssh-key ~/.ssh/
+mv ./tekton-ssh-key.pub ~/.ssh/
+chmod 600 ~/.ssh/tekton-ssh-key
+chmod 644 ~/.ssh/tekton-ssh-key.pub
+
+# paste the public key in bitbucket ssh keys
+check authentication success or not using following command
+ssh -T git@bitbucket.org
+
+create config file in .ssh loaction and add following :
+Host bitbucket.org
+  User git
+  IdentityFile ~/.ssh/tekton-ssh-key
+  
+encode the private key and known host and config and paste in the secret.yaml
+# Then create the secret in the cluster
+vi bitbucket-secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: git-credentials
+  namespace: tekton-pipelines
+data:
+  tekton-ssh-key: LS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0KYjNCbGJuTnphQzFyWlhrdGRqRUFBQUFBQkc1dmJtVUFBQUFFYm05dVpRQUFBQUFBQUFBQkFBQUFNd0FBQUF0emMyZ3RaVwpReU5UVXhPUUFBQUNEcjM1U3NmSm43azFOL1hkYjJRa1U4OHl2anhaNkxSam0zemxNdE9VeU1zQUFBQUpDUU5BRXdrRFFCCk1BQUFBQXR6YzJndFpXUXlOVFV4T1FBQUFDRHIzNVNzZkpuN2sxTi9YZGIyUWtVODh5dmp4WjZMUmptM3psTXRPVXlNc0EKQUFBRUFxRDFtY0EzbGRRM0hodXlwYWduMFFSOUNvWnlJY3pFdVdzMDlzaDFtZGZldmZsS3g4bWZ1VFUzOWQxdlpDUlR6egpLK1BGbm90R09iZk9VeTA1VEl5d0FBQUFDblJsYTNSdmJpMWliM1FCQWdNPQotLS0tLUVORCBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0K 
+  known_hosts: fDF8b2lLVGk3TytocnVkOTk2VTQxWUZjTDlqQzBnPXxuLzNNMFVCQlZtV1RSRDAzNi9jclF3aTJqZ0E9IHNzaC1lZDI1NTE5IEFBQUFDM056YUMxbFpESTFOVEU1QUFBQUlJYXpFdTg5d2dRWjRicXMzZDYzUVNNellWYTBNdUoyZTJnS1RLcXUrVVVPCnwxfEJwWkFKRnZLUW43OGRpYWlDVllCZFhyRE9Kbz18dXlnMHBqRy81d1IraUh1Wm9wbjVsVDhzVDh3PSBlY2RzYS1zaGEyLW5pc3RwMjU2IEFBQUFFMlZqWkhOaExYTm9ZVEl0Ym1semRIQXlOVFlBQUFBSWJtbHpkSEF5TlRZQUFBQkJCUElRbXV6TUJ1S2RXZUY0K2Eyc2pTU3BCSzBpcWl0U1ErNUJNOUtocGV4dUd0MjBKcFRWTTd1NUJEWm5nbmNncnFETWJXZHhNV1dPR3RaOVVnYnFnWkU9CnwxfHpmU0dkU1RGSENGUFlkNE5VTDJFUzV0SVcwUT18cWQ0QUI1a3VnY2JvaFV1MzdDdDl1N1JOb1prPSBzc2gtcnNhIEFBQUFCM056YUMxeWMyRUFBQUFEQVFBQkFBQUJnUURRZUp6aHVwUnUwdTBjZGVnWklhOGU4NkVHMnFPQ3NJc0QxWHcweFNlaVBEbENyN2txOTdOTG1NYnBLVFg2RXNjMzBOdW9xRUVIQ3VjN3lXdHdwOGRJNzZFRUVCMVZxWTlRSnE2dmsrYXlTeWJvRDVRRjYxSS8xV2VUd3UrZGVDYmdLTUdiVWlqZVhodGZieFN4bTZKd0dyWHJoQmRvZlRzYktSVXNyTjFXb05nVWE4dXFOMVZ4NldBSncxSkhQaGdsRUdHSGVhNlFJQ3dKT0FyLzZtcnVpL29CN3BrYVdLSGozejdkMUlDNEtXTHRZNDdlbHZqYmFUbGtOMDRLYy81TEZFaXJvckdZVmJ0MTVrQVVscUdNNjVwazZaQnh0YU8zKzMwTFZsT1Jaa3hPaCtMS0wvQnZiWi9pUk5oSXRMcU55aWVvUWovdWgvN0l2NHV5SC9jVi8wYjRXRFNkM0RwdGlnV3E4NGxKdWJiOXQvRG5abHJKYXp4eURDdWxUbUtkT1I3dnM5Z01Ubyt1b0lyUFNiOFNjVHR2dzY1K29kS0FsQmo1OWRoblZwOXpkN1FVb2pPcFhsTDYyQXc1NlU0b08rRkFMdWV2dk1qaVdlYXZLaEpxbFI3aTVuOXNyWWNyTlY3dHRtRHc3a2YvOTdQNXphdUloeGNqWCt4SHY0TT0K  
+  config: SG9zdCBiaXRidWNrZXQub3JnCiAgVXNlciBnaXQKICBJZGVudGl0eUZpbGUgfi8uc3NoL3Rla3Rvbi1zc2gta2V5
+
+Apply the secret 
+# Stage 1 clone the repo and read the read me file from repo
+We need 3 files pipeline, pipelinerun, tasks[ clone & readme ]
+
+tkn hub install task git-clone -n test
+OR
+kubectl apply -f \
+https://raw.githubusercontent.com/tektoncd/catalog/main/task/git-clone/0.6/git-clone.yaml -n test # This will install latest version dont run it as it is not working as expected
+
+create task readme.yaml
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: show-readme
+  namespace: test
+spec:
+  description: Read and display README file.
+  workspaces:
+  - name: source
+  steps:
+  - name: read
+    image: alpine:latest
+    script: |
+      #!/usr/bin/env sh
+      cat $(workspaces.source.path)/main_test.go
+
+create pipeline.yaml
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: clone-read
+  namespace: test
+spec:
+  description: |
+    This pipeline clones a git repo, then echoes the README file to the stout.
+  params:
+  - name: repo-url
+    type: string
+    description: The git repo URL to clone from.
+  workspaces:
+  - name: shared-data
+    description: |
+      This workspace contains the cloned repo files, so they can be read by the
+      next task.
+  - name: git-credentials
+    description: My ssh credentials
+  tasks:
+  - name: fetch-source
+    taskRef:
+      name: git-clone
+    workspaces:
+    - name: output
+      workspace: shared-data
+    - name: ssh-directory
+      workspace: git-credentials
+    params:
+    - name: url
+      value: $(params.repo-url)
+  - name: show-readme
+    runAfter: ["fetch-source"]
+    taskRef:
+      name: show-readme
+    workspaces:
+    - name: source
+      workspace: shared-data
+
+Create pipelinerun.yaml
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  generateName: clone-read-run-
+  namespace: test
+spec:
+  pipelineRef:
+    name: clone-read
+  podTemplate:
+    securityContext:
+      fsGroup: 65532
+  workspaces:
+  - name: shared-data
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+  - name: git-credentials
+    secret:
+      secretName: git-credentials
+  params:
+  - name: repo-url
+    value: git@bitbucket.org:NvizionSolutions/infra-check.git
+
+Apply the show-readme Task:
+kubectl apply -f readme.yaml
+
+Apply the Pipeline:
+kubectl apply -f pipeline.yaml
+
+Create the PipelineRun:
+kubectl create -f pipelinerun.yaml
+
+This creates a PipelineRun with a unique name each time:
+pipelinerun.tekton.dev/clone-read-run-4kgjr created
+
+Use the PipelineRun name from the output of the previous step to monitor the Pipeline execution:
+tkn pipelinerun list -n tekton-pipelines
+
+Above steps will do clone the private repo and then read the readme file from the repo means private clone success
+
+
+
+# How to clone and build the application and then push the image to artifact registry
+
+First we need to create the authentication with artifact registry, follow following steps for gke for other cloud follow steps from docs:
+Enable the Artifact Registry API:
+To check if it is already enabled : gcloud services list --filter="name:artifactregistry.googleapis.com"
+To enable the service run cmd: gcloud services enable artifactregistry.googleapis.com
+
+Create a Docker repository to push the image to:
+gcloud artifacts repositories create <repository-name> \
+  --repository-format=docker \
+  --location=us-central1 --description="Docker repository"
+
+Create a Kubernetes Service Account:
+kubectl create serviceaccount tekton-sa
+
+gcloud iam service-accounts create tekton-sa
+
+gcloud artifacts repositories add-iam-policy-binding zendesk \
+  --location asia-south1 \
+  --member=serviceAccount:tekton-sa@nviz-playground.iam.gserviceaccount.com \
+  --role=roles/artifactregistry.reader \
+  --role=roles/artifactregistry.writer
+
+kubectl annotate serviceaccount \
+tekton-sa \
+iam.gke.io/gcp-service-account=tekton-sa@nviz-playground.iam.gserviceaccount.com \
+-n test
+
+gcloud iam service-accounts add-iam-policy-binding \
+  --role roles/iam.workloadIdentityUser \
+  --member "serviceAccount:nviz-playground.svc.id.goog[test/tekton-sa]" \
+  tekton-sa@nviz-playground.iam.gserviceaccount.com
+
+This creates two service accounts, an IAM service account and a Kubernetes service account, and “links” them. Workload Identity allows workloads in your GKE cluster to impersonate IAM service accounts to access Google Cloud services.
+
+# create pipeline.yaml, pipelinerun.yaml and install clone and build task in test namespace:
+Create secret for cloning the repo as did above
+check if the secrets exist
+kubect get secret -n test
+
+Check if clone task is already installed in the test namespace
+tkn tasks list -n test
+If not then install
+
+Create kaniko-build task
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: kaniko-gke-build
+  namespace: test
+spec:
+  params:
+    - name: IMAGE
+      type: string
+      description: The name of the image to build and push.
+    - name: CONTEXT
+      type: string
+      description: The build context path.
+      default: ./
+  workspaces:
+    - name: source
+      description: The workspace with the source code.
+  steps:
+    - name: build-and-push
+      image: gcr.io/kaniko-project/executor:v1.9.0-debug
+      securityContext:
+        runAsUser: 0
+      args:
+        - --dockerfile=Dockerfile
+        - --context=$(workspaces.source.path)/$(params.CONTEXT)
+        - --destination=$(params.IMAGE)
+        - --oci-layout-path=/workspace/oci
+
+  Create pipeline
+
+  apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: clone-build-push
+  namespace: test
+spec:
+  description: |
+    This pipeline clones a git repo, builds a Docker image with Kaniko and
+    pushes it to a registry
+  params:
+  - name: repo-url
+    type: string
+  - name: image-reference
+    type: string
+  workspaces:
+  - name: shared-data
+  - name: git-credentials
+    description: My ssh credentials
+  tasks:
+  - name: fetch-source
+    taskRef:
+      name: git-clone
+    workspaces:
+    - name: output
+      workspace: shared-data
+    - name: ssh-directory
+      workspace: git-credentials
+    params:
+    - name: url
+      value: $(params.repo-url)
+  - name: build-push
+    runAfter: ["fetch-source"]
+    taskRef:
+      name: kaniko-gke-build
+    workspaces:
+    - name: source
+      workspace: shared-data
+    params:
+    - name: IMAGE
+      value: $(params.image-reference)
+
+Create pipelinerun
+
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  generateName: clone-build-push-run-
+  namespace: test
+spec:
+  serviceAccountName: tekton-sa
+  pipelineRef:
+    name: clone-build-push
+  podTemplate:
+    securityContext:
+      fsGroup: 65532
+      runAsUser: 0
+  workspaces:
+  - name: shared-data
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+  - name: git-credentials
+    secret:
+      secretName: git-credentials
+  params:
+  - name: repo-url
+    value: git@bitbucket.org:NvizionSolutions/n7-playground-nginx.git
+  - name: image-reference
+    value: asia-south1-docker.pkg.dev/nviz-playground/zendesk/zendesk/myimage:latest
+
+k apply -f kaniko-build.yaml
+k apply -f pipeline.yaml
+k create -f pipelinerun.yaml
+Then check the pipelinerun logs
+tkn pipelinern list -n test
+tkn pipelinerun logs name -n test
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Install ingress + cert-manager
+
+Bitbucket webhooks need a public HTTPS endpoint. We install nginx ingress + cert-manager for that.
+
+# Ingress controller
+kubectl create ns ingress-nginx
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+helm install ingress-nginx ingress-nginx/ingress-nginx -n ingress-nginx
+
+# Cert-manager
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.crds.yaml
+kubectl create ns cert-manager
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+helm install cert-manager jetstack/cert-manager -n cert-manager
+Why: This lets us expose Tekton EventListener (for Bitbucket) and Tekton Dashboard (for humans).
 
 Step 7 — Expose EventListener + Dashboard
 
@@ -108,270 +450,6 @@ kubectl apply -f bb-ingress.yaml
 kubectl apply -f dashboard-ingress.yaml
 
 Why: This makes Tekton UI available at one hostname and EventListener reachable by Bitbucket webhook at another.
-
-
-
-# Option 1: Install tkn CLI 
-# Download latest release (Linux AMD64)
-curl -LO https://github.com/tektoncd/cli/releases/download/v0.36.0/tkn_0.36.0_Linux_x86_64.tar.gz
-
-# Extract
-tar xvzf tkn_0.36.0_Linux_x86_64.tar.gz
-
-# Move binary to PATH
-sudo mv tkn /usr/local/bin/
-
-# Verify
-tkn version
-
-# authentication with bitbucket
-We can do it by ssh
-ssh-keygen -t ed25519 -C "tekton-bot" -f ./tekton-ssh-key -N ""
-ssh -i ./tekton-ssh-key git@bitbucket.org
-ssh-keyscan bitbucket.org > known_hosts
-mv ./tekton-ssh-key ~/.ssh/
-mv ./tekton-ssh-key.pub ~/.ssh/
-chmod 600 ~/.ssh/tekton-ssh-key
-chmod 644 ~/.ssh/tekton-ssh-key.pub
-
-# paste the public key in bitbucket ssh keys
-check authentication success or not using following command
-ssh -T git@bitbucket.org
-
-create config file in .ssh loaction and add following :
-Host bitbucket.org
-  User git
-  IdentityFile ~/.ssh/tekton-ssh-key
-  
-encode the private key and known host and config and paste in the secret.yaml
-# Then create the secret in the cluster
-vi bitbucket-secret.yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: git-credentials
-  namespace: tekton-pipelines
-data:
-  tekton-ssh-key: LS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0KYjNCbGJuTnphQzFyWlhrdGRqRUFBQUFBQkc1dmJtVUFBQUFFYm05dVpRQUFBQUFBQUFBQkFBQUFNd0FBQUF0emMyZ3RaVwpReU5UVXhPUUFBQUNEcjM1U3NmSm43azFOL1hkYjJRa1U4OHl2anhaNkxSam0zemxNdE9VeU1zQUFBQUpDUU5BRXdrRFFCCk1BQUFBQXR6YzJndFpXUXlOVFV4T1FBQUFDRHIzNVNzZkpuN2sxTi9YZGIyUWtVODh5dmp4WjZMUmptM3psTXRPVXlNc0EKQUFBRUFxRDFtY0EzbGRRM0hodXlwYWduMFFSOUNvWnlJY3pFdVdzMDlzaDFtZGZldmZsS3g4bWZ1VFUzOWQxdlpDUlR6egpLK1BGbm90R09iZk9VeTA1VEl5d0FBQUFDblJsYTNSdmJpMWliM1FCQWdNPQotLS0tLUVORCBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0K 
-  known_hosts: fDF8b2lLVGk3TytocnVkOTk2VTQxWUZjTDlqQzBnPXxuLzNNMFVCQlZtV1RSRDAzNi9jclF3aTJqZ0E9IHNzaC1lZDI1NTE5IEFBQUFDM056YUMxbFpESTFOVEU1QUFBQUlJYXpFdTg5d2dRWjRicXMzZDYzUVNNellWYTBNdUoyZTJnS1RLcXUrVVVPCnwxfEJwWkFKRnZLUW43OGRpYWlDVllCZFhyRE9Kbz18dXlnMHBqRy81d1IraUh1Wm9wbjVsVDhzVDh3PSBlY2RzYS1zaGEyLW5pc3RwMjU2IEFBQUFFMlZqWkhOaExYTm9ZVEl0Ym1semRIQXlOVFlBQUFBSWJtbHpkSEF5TlRZQUFBQkJCUElRbXV6TUJ1S2RXZUY0K2Eyc2pTU3BCSzBpcWl0U1ErNUJNOUtocGV4dUd0MjBKcFRWTTd1NUJEWm5nbmNncnFETWJXZHhNV1dPR3RaOVVnYnFnWkU9CnwxfHpmU0dkU1RGSENGUFlkNE5VTDJFUzV0SVcwUT18cWQ0QUI1a3VnY2JvaFV1MzdDdDl1N1JOb1prPSBzc2gtcnNhIEFBQUFCM056YUMxeWMyRUFBQUFEQVFBQkFBQUJnUURRZUp6aHVwUnUwdTBjZGVnWklhOGU4NkVHMnFPQ3NJc0QxWHcweFNlaVBEbENyN2txOTdOTG1NYnBLVFg2RXNjMzBOdW9xRUVIQ3VjN3lXdHdwOGRJNzZFRUVCMVZxWTlRSnE2dmsrYXlTeWJvRDVRRjYxSS8xV2VUd3UrZGVDYmdLTUdiVWlqZVhodGZieFN4bTZKd0dyWHJoQmRvZlRzYktSVXNyTjFXb05nVWE4dXFOMVZ4NldBSncxSkhQaGdsRUdHSGVhNlFJQ3dKT0FyLzZtcnVpL29CN3BrYVdLSGozejdkMUlDNEtXTHRZNDdlbHZqYmFUbGtOMDRLYy81TEZFaXJvckdZVmJ0MTVrQVVscUdNNjVwazZaQnh0YU8zKzMwTFZsT1Jaa3hPaCtMS0wvQnZiWi9pUk5oSXRMcU55aWVvUWovdWgvN0l2NHV5SC9jVi8wYjRXRFNkM0RwdGlnV3E4NGxKdWJiOXQvRG5abHJKYXp4eURDdWxUbUtkT1I3dnM5Z01Ubyt1b0lyUFNiOFNjVHR2dzY1K29kS0FsQmo1OWRoblZwOXpkN1FVb2pPcFhsTDYyQXc1NlU0b08rRkFMdWV2dk1qaVdlYXZLaEpxbFI3aTVuOXNyWWNyTlY3dHRtRHc3a2YvOTdQNXphdUloeGNqWCt4SHY0TT0K  
-  config: SG9zdCBiaXRidWNrZXQub3JnCiAgVXNlciBnaXQKICBJZGVudGl0eUZpbGUgfi8uc3NoL3Rla3Rvbi1zc2gta2V5
-
-Apply the secret 
-
-# create the test pipeline
-vi pipeline.yaml
-apiVersion: tekton.dev/v1beta1
-kind: Pipeline
-metadata:
-  name: clone-read
-  namespace: tekton-pipelines
-spec:
-  description: | 
-    This pipeline clones a git repo, then echoes the README file to the stout.
-  params:
-  - name: repo-url
-    type: string
-    description: The git repo URL to clone from.
-  workspaces:
-  - name: shared-data
-    description: | 
-      This workspace contains the cloned repo files, so they can be read by the
-      next task.
-  - name: git-credentials
-    description: My ssh credentials
-  tasks:
-  - name: fetch-source
-    taskRef:
-      name: git-clone
-    workspaces:
-    - name: output
-      workspace: shared-data
-    - name: ssh-directory
-      workspace: git-credentials
-    params:
-    - name: url
-      value: $(params.repo-url)
-  - name: show-readme
-    runAfter: ["fetch-source"]
-    taskRef:
-      name: show-readme
-    workspaces:
-    - name: source
-      workspace: shared-data
-
-# create pipelinerun [ reference taken for this cloning is from official docs https://tekton.dev/docs/how-to-guides/clone-repository/ ]
-vi pipelinerun.yaml
-apiVersion: tekton.dev/v1beta1
-kind: PipelineRun
-metadata:
-  generateName: clone-read-run-
-  namespace: tekton-pipelines
-spec:
-  pipelineRef:
-    name: clone-read
-  podTemplate:
-    securityContext:
-      fsGroup: 65532
-  workspaces:
-  - name: shared-data
-    volumeClaimTemplate:
-      spec:
-        accessModes:
-        - ReadWriteOnce
-        resources:
-          requests:
-            storage: 1Gi
-  - name: git-credentials
-    secret:
-      secretName: git-credentials
-  params:
-  - name: repo-url
-    value: git@bitbucket.org:woodpeckernew/test.git
-
-# Create task of read readme file
-vi readme.yaml
-apiVersion: tekton.dev/v1beta1
-kind: Task
-metadata:
-  name: show-readme
-  namespace: tekton-pipelines
-spec:
-  description: Read and display README file.
-  workspaces:
-  - name: source
-  steps:
-  - name: read
-    image: alpine:latest
-    script: | 
-      #!/usr/bin/env sh
-      cat $(workspaces.source.path)/README.md
-
-# How to run
-To use the git clone Task in your pipeline, you have to install it on your cluster first. You can do this with the tkn command:
-tkn hub install task git-clone -n tekton-pipelines
-OR
-kubectl apply -f \
-https://raw.githubusercontent.com/tektoncd/catalog/main/task/git-clone/0.6/git-clone.yaml
-
-Apply the show-readme Task:
-kubectl apply -f show-readme.yaml
-
-Apply the Pipeline:
-kubectl apply -f pipeline.yaml
-
-Create the PipelineRun:
-kubectl create -f pipelinerun.yaml
-
-This creates a PipelineRun with a unique name each time:
-pipelinerun.tekton.dev/clone-read-run-4kgjr created
-
-Use the PipelineRun name from the output of the previous step to monitor the Pipeline execution:
-tkn pipelinerun list -n tekton-pipelines
-
-Aove steps will do clone the private repo and then read the readme file from the repo means private clone success
-
-# How to clone and build the application and then push the image to artifact registry
-First we need to create the authentication with artifact registry, follow following steps for gke for other cloud folloe steps from docs:
-Enable the Artifact Registry API:
-To check if it is already enabled : gcloud services list --filter="name:artifactregistry.googleapis.com"
-To enable the service run cmd: gcloud services enable artifactregistry.googleapis.com
-
-Create a Docker repository to push the image to:
-gcloud artifacts repositories create <repository-name> \
-  --repository-format=docker \
-  --location=us-central1 --description="Docker repository"
-
-Create a Kubernetes Service Account:
-kubectl create serviceaccount tekton-sa
-gcloud iam service-accounts create tekton-sa
-gcloud artifacts repositories add-iam-policy-binding zendesk \
-  --location asia-south1 \
-  --member=serviceAccount:tekton-sa@nviz-playground.iam.gserviceaccount.com \
-  --role=roles/artifactregistry.reader \
-  --role=roles/artifactregistry.writer
-
-kubectl annotate serviceaccount \
-tekton-sa \
-iam.gke.io/gcp-service-account=tekton-sa@nviz-playground.iam.gserviceaccount.com \
--n test
-
-gcloud iam service-accounts add-iam-policy-binding \
-  --role roles/iam.workloadIdentityUser \
-  --member "serviceAccount:nviz-playground.svc.id.goog[test/tekton-sa]" \
-  tekton-sa@nviz-playground.iam.gserviceaccount.com
-
-This creates two service accounts, an IAM service account and a Kubernetes service account, and “links” them. Workload Identity allows workloads in your GKE cluster to impersonate IAM service accounts to access Google Cloud services.
-
-# create pipeline.yaml, pipelinerun.yaml and install clone and build task in test namespace:
-vi pipeline.yaml
-apiVersion: tekton.dev/v1beta1
-kind: Pipeline
-metadata:
-  name: clone-build-push
-spec:
-  description: |
-    This pipeline clones a git repo, builds a Docker image with Kaniko and
-    pushes it to a registry    
-  params:
-  - name: repo-url
-    type: string
-  - name: image-reference
-    type: string
-  workspaces:
-  - name: shared-data
-  tasks:
-  - name: fetch-source
-    taskRef:
-      name: git-clone
-    workspaces:
-    - name: output
-      workspace: shared-data
-    params:
-    - name: url
-      value: $(params.repo-url)
-  - name: build-push
-    runAfter: ["fetch-source"]
-    taskRef:
-      name: kaniko
-    workspaces:
-    - name: source
-      workspace: shared-data
-    params:
-    - name: IMAGE
-      value: $(params.image-reference)
-
-
-vi pipelinerun.yaml
-apiVersion: tekton.dev/v1beta1
-kind: PipelineRun
-metadata:
-  generateName: clone-build-push-run-
-spec:
-  pipelineRef:
-    name: clone-build-push
-  podTemplate:
-    securityContext:
-      fsGroup: 65532
-  workspaces:
-  - name: shared-data
-    volumeClaimTemplate:
-      spec:
-        accessModes:
-        - ReadWriteOnce
-        resources:
-          requests:
-            storage: 1Gi
-  params:
-  - name: repo-url
-    value: https://github.com/google/docsy-example.git
-  - name: image-reference
-    value: container.registry.com/sublocation/my_app:version
-
-
-
-
-
-
 
 ServiceAccounts & Workload Identity
 
