@@ -10,7 +10,7 @@ gcloud container clusters describe n7-playground-cluster \
     --format="value(workloadIdentityConfig.workloadPool)"
 
 If not then enable using following command:
-
+gcloud container clusters update n7-playground-cluster   --zone asia-south1-c   --workload-pool=nviz-playground.svc.id.goog
 
 
 Then Check first if the respective nodepool have worload identity enabled or not:
