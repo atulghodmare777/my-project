@@ -15,16 +15,16 @@ gcloud container clusters update n7-playground-cluster   --zone asia-south1-c   
 
 Then Check first if the respective nodepool have worload identity enabled or not:
 gcloud container node-pools describe swap-memory-pool \
-    --cluster=n7-playground-cluster \
-    --zone=asia-south1-c \
-    --format="value(workloadMetadataConfig.nodeMetadata)"
+  --cluster=n7-playground-cluster \
+  --zone=asia-south1-c \
+  --format="yaml(config.workloadMetadataConfig)"
 
 Enable the nodepool level WI using following command:
 gcloud container node-pools update nodepoool-name \
   --cluster=cluster-name \
   --zone=asia-south1-c \
   --workload-metadata=GKE_METADATA
-  
+
 Install Tekton Operator
 
 The Operator installs Pipelines, Triggers, and Dashboard in one go.
