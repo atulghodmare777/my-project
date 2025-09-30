@@ -25,8 +25,6 @@ gcloud container node-pools update nodepoool-name \
   --zone=asia-south1-c \
   --workload-metadata=GKE_METADATA
   
-
-
 Install Tekton Operator
 
 The Operator installs Pipelines, Triggers, and Dashboard in one go.
