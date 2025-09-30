@@ -3,6 +3,23 @@ When the pipeline runs with task build and push , push was failing due to permis
 Solution:
 Cluster level workload identity(WI) was enabled but old nodepool was still running hence automatically only to the new nodepools WI will be enabled but not to the old nodepools hence updated manually the existing nodepool for WI by following command
 
+check if cluster level workload identity is enabled or not
+gcloud container clusters describe n7-playground-cluster \
+    --project=nviz-playground \
+    --zone=asia-south1-c \
+    --format="value(workloadIdentityConfig.workloadPool)"
+
+If not then enable using following command:
+
+
+
+Then Check first if the respective nodepool have worload identity enabled or not:
+gcloud container node-pools describe swap-memory-pool \
+    --cluster=n7-playground-cluster \
+    --zone=asia-south1-c \
+    --format="value(workloadMetadataConfig.nodeMetadata)"
+
+Enable the nodepool level WI using following command:
 gcloud container node-pools update nodepoool-name \
   --cluster=cluster-name \
   --zone=asia-south1-c \
