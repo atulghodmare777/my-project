@@ -361,6 +361,199 @@ Then check the pipelinerun logs
 tkn pipelinern list -n test
 tkn pipelinerun logs name -n test
 
+# Now we want to automate it with trigger
+create role, rolebinding, clusterrole, clusterrolebindings
+vi tekton-sa-role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tekton-triggers-role
+  namespace: test
+rules:
+  - apiGroups: ["triggers.tekton.dev"]
+    resources: ["triggers", "triggertemplates", "triggerbindings", "eventlisteners", "interceptors"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+vi tekton-sa-rolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tekton-triggers-binding
+  namespace: test
+subjects:
+  - kind: ServiceAccount
+    name: tekton-sa
+    namespace: test
+roleRef:
+  kind: Role
+  name: tekton-triggers-role
+  apiGroup: rbac.authorization.k8s.io
+
+vi cluster-role-rolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tekton-triggers-clusterrole
+rules:
+  - apiGroups: ["triggers.tekton.dev"]
+    resources: ["clustertriggerbindings", "clusterinterceptors"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tekton-triggers-clusterrolebinding
+subjects:
+  - kind: ServiceAccount
+    name: tekton-sa
+    namespace: test
+roleRef:
+  kind: ClusterRole
+  name: tekton-triggers-clusterrole
+  apiGroup: rbac.authorization.k8s.io
+
+
+
+Create following files
+vi clustertriggerbinding.yaml
+apiVersion: triggers.tekton.dev/v1beta1
+kind: ClusterTriggerBinding
+metadata:
+  name: bitbucket-push-clusterbinding
+spec:
+  params:
+    - name: repo_full_name
+      value: $(body.repository.full_name)
+    - name: branch
+      value: $(body.push.changes[0].new.name)
+    - name: commit_sha
+      value: $(body.push.changes[0].new.target.hash)
+
+vi trigger-template.yaml
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: bitbucket-push-template
+  namespace: test
+spec:
+  params:
+    - name: repo_full_name
+    - name: branch
+    - name: commit_sha
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        generateName: clone-build-push-run-
+        namespace: test
+      spec:
+        serviceAccountName: tekton-sa
+        pipelineRef:
+          name: clone-build-push
+        workspaces:
+          - name: shared-data
+            volumeClaimTemplate:
+              spec:
+                accessModes: ["ReadWriteOnce"]
+                resources:
+                  requests:
+                    storage: 1Gi
+          - name: git-credentials
+            secret:
+              secretName: git-credentials
+        params:
+          - name: repo-url
+            value: git@bitbucket.org:$(tt.params.repo_full_name).git
+          - name: image-reference
+            value: asia-south1-docker.pkg.dev/nviz-playground/zendesk/zendesk:$(tt.params.commit_sha)
+
+vi trigger.yaml
+apiVersion: triggers.tekton.dev/v1beta1
+kind: Trigger
+metadata:
+  name: bitbucket-push-trigger
+  namespace: test
+spec:
+  bindings:
+    - kind: ClusterTriggerBinding
+      ref: bitbucket-push-clusterbinding
+  template:
+    ref: bitbucket-push-template
+  interceptors:
+    - ref:
+        name: "cel"
+      params:
+        - name: "filter"
+          value: "body.push.changes[0].new.name == 'main'"
+
+vi event-listner.yaml
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: bitbucket-listener
+  namespace: test
+spec:
+  serviceAccountName: tekton-sa
+  triggers:
+    - triggerRef: bitbucket-push-trigger
+
+Apply all the files in order:
+kubectl apply -f clustertriggerbinding.yaml        
+kubectl apply -f trigger-template.yaml
+kubectl apply -f trigger.yaml
+kubectl apply -f event-listner.yaml
+
+Verify if the objects are applied and deployed
+kubectl get clustertriggerbindings
+kubectl get triggertemplate -n test
+kubectl get trigger -n test
+kubectl get eventlistener -n test
+
+# create ingress configuration 
+
+Then create the ingress for bitbucket webhook url which should be publically accessible
+vi bitbucket-listner-ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bitbucket-listener-ingress
+  namespace: test
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+    - host: bitbucket-listener.35.244.2.22.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: el-bitbucket-listener
+                port:
+                  number: 8080
+
+Check the ing: k get ing -n test
+If new load balancer ip arrives the edit the ing and add that in the host
+
+# create the webhook for bitbucket
+Now go the bitbucket repo and in the repo setting add the webhook
+name: Tekton Trigger
+URL: http://bitbucket-listener.35.244.2.22.nip.io
+Triggers: select Repository push (or whatever event your TriggerTemplate expects)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
