@@ -457,6 +457,10 @@ spec:
         serviceAccountName: tekton-sa
         pipelineRef:
           name: clone-build-push
+        podTemplate:
+          securityContext:
+           fsGroup: 65532
+           runAsUser: 0
         workspaces:
           - name: shared-data
             volumeClaimTemplate:
@@ -472,8 +476,7 @@ spec:
           - name: repo-url
             value: git@bitbucket.org:$(tt.params.repo_full_name).git
           - name: image-reference
-            value: asia-south1-docker.pkg.dev/nviz-playground/zendesk/zendesk:$(tt.params.commit_sha)
-
+            value: asia-south1-docker.pkg.dev/tekton4/tekton:$(tt.params.commit_sha)
 vi trigger.yaml
 apiVersion: triggers.tekton.dev/v1beta1
 kind: Trigger
