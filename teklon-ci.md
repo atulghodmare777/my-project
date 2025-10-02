@@ -476,7 +476,7 @@ spec:
           - name: repo-url
             value: git@bitbucket.org:$(tt.params.repo_full_name).git
           - name: image-reference
-            value: asia-south1-docker.pkg.dev/tekton4/tekton:$(tt.params.commit_sha)
+            value: asia-south1-docker.pkg.dev/tekton4/tekton/myimages:$(tt.params.commit_sha)
 vi trigger.yaml
 apiVersion: triggers.tekton.dev/v1beta1
 kind: Trigger
