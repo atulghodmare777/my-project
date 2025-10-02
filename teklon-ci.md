@@ -218,7 +218,7 @@ gcloud artifacts repositories create <repository-name> \
   --location=us-central1 --description="Docker repository"
 
 Create a Kubernetes Service Account:
-kubectl create serviceaccount tekton-sa
+kubectl create serviceaccount tekton-sa -n test
 
 gcloud iam service-accounts create tekton-sa
 
@@ -280,7 +280,7 @@ spec:
 
   Create pipeline
 
-  apiVersion: tekton.dev/v1beta1
+apiVersion: tekton.dev/v1beta1
 kind: Pipeline
 metadata:
   name: clone-build-push
@@ -374,6 +374,11 @@ rules:
     resources: ["triggers", "triggertemplates", "triggerbindings", "eventlisteners", "interceptors"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
+  - apiGroups: ["tekton.dev"]
+    resources: ["pipelineruns", "tasks", "taskruns"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+k apply -f tekton-sa-role.yaml
+
 vi tekton-sa-rolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -388,6 +393,7 @@ roleRef:
   kind: Role
   name: tekton-triggers-role
   apiGroup: rbac.authorization.k8s.io
+k apply -f tekton-sa-rolebinding.yaml
 
 vi cluster-role-rolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -412,7 +418,7 @@ roleRef:
   kind: ClusterRole
   name: tekton-triggers-clusterrole
   apiGroup: rbac.authorization.k8s.io
-
+k apply -f cluster-role-rolebinding.yaml
 
 
 Create following files
@@ -533,7 +539,7 @@ spec:
                 name: el-bitbucket-listener
                 port:
                   number: 8080
-
+k apply -f bitbucket-listner-ingress.yaml
 Check the ing: k get ing -n test
 If new load balancer ip arrives the edit the ing and add that in the host
 
