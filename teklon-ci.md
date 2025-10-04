@@ -701,7 +701,7 @@ spec:
 
 #### Create Role & Rolebinding
 
-Create `tekton-sa-role.yaml`:
+Create `tekton-sa-role-rolebinding.yaml`:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -733,31 +733,7 @@ roleRef:
 ```
 
 ```bash
-kubectl apply -f tekton-sa-role.yaml
-```
-
-#### Create RoleBinding
-
-Create `tekton-sa-rolebinding.yaml`:
-
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: tekton-triggers-binding
-  namespace: test
-subjects:
-  - kind: ServiceAccount
-    name: tekton-sa
-    namespace: test
-roleRef:
-  kind: Role
-  name: tekton-triggers-role
-  apiGroup: rbac.authorization.k8s.io
-```
-
-```bash
-kubectl apply -f tekton-sa-rolebinding.yaml
+kubectl apply -f tekton-sa-role-rolebinding.yaml
 ```
 
 #### Create ClusterRole and ClusterRoleBinding
