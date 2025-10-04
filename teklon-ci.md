@@ -699,7 +699,7 @@ spec:
 
 ### Configure RBAC
 
-#### Create Role
+#### Create Role & Rolebinding
 
 Create `tekton-sa-role.yaml`:
 
@@ -716,6 +716,20 @@ rules:
   - apiGroups: ["tekton.dev"]
     resources: ["pipelineruns", "tasks", "taskruns"]
     verbs: ["get", "list", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tekton-triggers-binding
+  namespace: test
+subjects:
+  - kind: ServiceAccount
+    name: tekton-sa
+    namespace: test
+roleRef:
+  kind: Role
+  name: tekton-triggers-role
+  apiGroup: rbac.authorization.k8s.io
 ```
 
 ```bash
