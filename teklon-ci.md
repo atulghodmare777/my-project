@@ -210,7 +210,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: git-credentials
-  namespace: tekton-pipelines
+  namespace: test
 data:
   tekton-ssh-key: <BASE64_ENCODED_PRIVATE_KEY>
   known_hosts: <BASE64_ENCODED_KNOWN_HOSTS>
