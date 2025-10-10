@@ -28,10 +28,11 @@ This is essential for authenticating the autoscaler to Bitbucket’s API.
 1. Navigate to **Bitbucket → Workspace Settings → OAuth Consumers**  
 2. Click **Add consumer** and fill in:
    - **Name:** `gke-runner-autoscaler`
-   - **Callback URL:** `https://bitbucket.org/site/oauth2/callback`
+   - **Callback URL:** `https://bitbucket.org`
+   - **URL:** `https://bitbucket.org`
    - **Type:** Select **Private (Confidential)** (⚠️ required)
 3. Under **Permissions**, enable:
-   - ✅ `Account: Write`
+   - ✅ `Account: Read`
    - ✅ `Repository: Read`
    - ✅ `Pipeline: Write`
    - ✅ `Runner: Write`
