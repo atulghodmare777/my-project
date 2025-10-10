@@ -128,6 +128,9 @@ We uncommented and edited two patch sections:
 
 yaml
 Copy code
+images:
+  - name: bitbucketpipelines/runners-autoscaler
+    newTag: 3.9.0     # Remember to use this image as for old image it will not work
 patches:
   - target:
       version: v1
@@ -340,7 +343,7 @@ commonLabels:
 
 images:
   - name: bitbucketpipelines/runners-autoscaler
-    newTag: 3.9.0
+    newTag: 3.9.0     # Remember to use this image as for old image it will not work
 
 patches:
   - target:
