@@ -47,8 +47,7 @@ kustomize/
 This file controls autoscaler logic, Bitbucket workspace connection, labels,
 and scaling parameters.
 
-yaml
-Copy code
+vi runners_config.yaml
 constants:
   default_sleep_time_runner_setup: 10
   default_sleep_time_runner_delete: 5
@@ -76,6 +75,7 @@ groups:
       limits:
         memory: "2Gi"
         cpu: "1000m"
+
 🧠 Explanation:
 workspace: UUID of Bitbucket workspace.
 
@@ -87,14 +87,16 @@ min: 1: Keeps one warm runner ready (prevents cold-start build failures).
 
 Scaling happens dynamically based on pipeline activity.
 
+Encode the oauth consumer
+echo -n "your-client-id" | base64
+echo -n "your-client-secret" | base64
+
+Then we uncommented the environment patch that injects these values into
 2️⃣ Edit values/kustomization.yaml
-We did not create any secret manually with kubectl.
-Instead, we injected the OAuth Client ID and Secret using Kustomize patches here.
 
-We uncommented and edited the patch section like this:
+We uncommented at 2 places in this file first in kind secret and second in kind deployment and edited the patch section like this:
 
-yaml
-Copy code
+vi kustomization.yaml
 patches:
   - target:
       version: v1
@@ -108,17 +110,7 @@ patches:
       - op: add
         path: /data/bitbucketOauthClientSecret
         value: "<BASE64_CLIENT_SECRET>"
-To generate the base64 strings:
 
-bash
-Copy code
-echo -n "your-client-id" | base64
-echo -n "your-client-secret" | base64
-Then we uncommented the environment patch that injects these values into
-the controller pods:
-
-yaml
-Copy code
   - target:
       version: v1
       kind: Deployment
