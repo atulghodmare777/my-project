@@ -1,34 +1,57 @@
 # 🚀 Bitbucket Kubernetes Runner Autoscaler on GKE  
-### *Accurate Setup Documentation (Actual Implementation & Troubleshooting)*
+### *Accurate Implementation & Troubleshooting Documentation*
 
-This document details the **exact implementation steps** performed to set up the  
-**Bitbucket Runners Autoscaler** on **Google Kubernetes Engine (GKE)** — including  
-the real file edits, deployment sequence, and issues encountered (with resolutions).
+This document outlines the **real-world steps** performed to deploy and validate  
+the **Bitbucket Runners Autoscaler** on **Google Kubernetes Engine (GKE)** —  
+including OAuth setup, file modifications, deployment, and troubleshooting.
 
 ---
 
 ## 🧩 Overview
 
-The **Bitbucket Runner Autoscaler** dynamically creates and deletes Kubernetes pods that run Bitbucket Pipelines builds.
+The **Bitbucket Runner Autoscaler** dynamically manages Kubernetes pods that execute Bitbucket Pipelines.  
+It connects Bitbucket Cloud to your GKE cluster and scales runners automatically.
 
 | Component | Namespace | Description |
 |------------|------------|-------------|
-| `runner-controller` | `bitbucket-runner-control-plane` | Manages communication with Bitbucket and creates/deletes runner pods. |
-| `runner-controller-cleaner` | `bitbucket-runner-control-plane` | Cleans up stale or terminated runner pods. |
-| `runner-*` pods | `default` | Execute actual Bitbucket pipeline steps (Docker-in-Docker). |
+| `runner-controller` | `bitbucket-runner-control-plane` | Handles communication with Bitbucket and creates/deletes runner pods. |
+| `runner-controller-cleaner` | `bitbucket-runner-control-plane` | Cleans up completed or idle runner pods. |
+| `runner-*` pods | `default` | Actual Bitbucket runner agents that execute pipeline steps. |
 
 ---
 
-## 📁 Repository & File Structure
+## 🧾 Step 1 — Create Bitbucket OAuth Consumer
 
-We cloned the **official Bitbucket Runners Autoscaler** repository:
+Before deploying the autoscaler, we created a **Bitbucket OAuth Consumer**.  
+This is essential for authenticating the autoscaler to Bitbucket’s API.
+
+1. Navigate to **Bitbucket → Workspace Settings → OAuth Consumers**  
+2. Click **Add consumer** and fill in:
+   - **Name:** `gke-runner-autoscaler`
+   - **Callback URL:** `https://bitbucket.org/site/oauth2/callback`
+   - **Type:** Select **Private (Confidential)** (⚠️ required)
+3. Under **Permissions**, enable:
+   - ✅ `Account: Write`
+   - ✅ `Repository: Read`
+   - ✅ `Pipeline: Write`
+   - ✅ `Runner: Write`
+4. Click **Save**  
+5. Copy:
+   - **Key (Client ID)**
+   - **Secret (Client Secret)**  
+
+You’ll use these in the next step.
+
+---
+
+## 📦 Step 2 — Clone the Bitbucket Autoscaler Repository
 
 ```bash
 git clone https://bitbucket.org/bitbucketpipelines/runners-autoscaler.git
 cd runners-autoscaler/kustomize
-After cloning, the relevant structure was:
+After cloning, verify the structure:
 
-kotlin
+csharp
 Copy code
 kustomize/
 ├── base/
@@ -38,16 +61,16 @@ kustomize/
 │   ├── kustomization.yaml
 │   ├── namespace.yaml
 │   ├── rbac.yaml
-│   ├── secret.yaml               ← Already present (we didn’t edit this)
+│   ├── secret.yaml               ← Already present (we did NOT edit this)
 └── values/
     ├── kustomization.yaml        ← We edited this to inject OAuth credentials
-    └── runners_config.yaml       ← We edited this to configure scaling behavior
-⚙️ Configuration Changes
-1️⃣ Edit values/runners_config.yaml
-This file controls autoscaler logic, Bitbucket workspace connection, labels,
-and scaling parameters.
+    └── runners_config.yaml       ← We edited this to configure scaling and namespace
+⚙️ Step 3 — Configure the Autoscaler
+🧩 Edit values/runners_config.yaml
+This file defines how the autoscaler connects to Bitbucket, manages scaling, and sets runner labels.
 
-vi runners_config.yaml
+yaml
+Copy code
 constants:
   default_sleep_time_runner_setup: 10
   default_sleep_time_runner_delete: 5
@@ -56,14 +79,14 @@ constants:
 
 groups:
   - name: "Runner group 1"
-    workspace: "{6321d246-a40a-4776-8497-372a41771e65}"
-# we can get workspace id by pasting url in browser https://api.bitbucket.org/2.0/workspaces/workspace_id,replace workspaceid in url
+    workspace: "{6321d246-a40a-4776-8497-372a41771e65}"  # Workspace UUID (use braces)
+    # Get this via: https://api.bitbucket.org/2.0/workspaces/<your-workspace-id>
     labels:
       - "gke.runner"
-    namespace: "default"  # Namespace where runner pods will be created
+    namespace: "default"  # Target namespace for runner pods
     strategy: "percentageRunnersIdle"
     parameters:
-      min: 1
+      min: 1               # Keep one warm runner (prevents cold start failures)
       max: 10
       scale_up_threshold: 0.5
       scale_down_threshold: 0.2
@@ -76,28 +99,33 @@ groups:
       limits:
         memory: "2Gi"
         cpu: "1000m"
+🧠 Notes:
 
-🧠 Explanation:
-workspace: UUID of Bitbucket workspace.
+workspace: The Bitbucket workspace UUID (inside {}).
 
-labels: Custom runner labels. Only gke.runner was used to avoid conflicts.
+labels: Custom label for runners. Only gke.runner used (Bitbucket auto-adds linux, self.hosted).
 
-namespace: We used default to prevent control-plane namespace errors.
+namespace: Use default — control-plane namespace is reserved.
 
-min: 1: Keeps one warm runner ready (prevents cold-start build failures).
+min: 1: Keeps one standby runner for fast builds.
 
-Scaling happens dynamically based on pipeline activity.
+🔐 Step 4 — Inject OAuth Credentials via Kustomize
+We didn’t create a secret manually.
+Instead, we updated values/kustomization.yaml to patch the secret using Kustomize.
 
-Encode the oauth consumer
-echo -n "your-client-id" | base64
-echo -n "your-client-secret" | base64
+🧭 Generate Base64 Credentials
+Encode the OAuth credentials:
 
-Then we uncommented the environment patch that injects these values into
-2️⃣ Edit values/kustomization.yaml
+bash
+Copy code
+echo -n "<your-client-id>" | base64
+echo -n "<your-client-secret>" | base64
+🛠️ Update values/kustomization.yaml
+We uncommented and edited two patch sections:
+(1) Secret injection and (2) Deployment environment variables.
 
-We uncommented at 2 places in this file first in kind secret and second in kind deployment and edited the patch section like this:
-
-vi kustomization.yaml
+yaml
+Copy code
 patches:
   - target:
       version: v1
@@ -132,66 +160,63 @@ patches:
                 name: runner-bitbucket-credentials
 📘 Notes:
 
-The runner-bitbucket-credentials Secret gets generated automatically when applying Kustomize.
+We edited only values/kustomization.yaml.
 
-We only edited values/kustomization.yaml, not any files under base/.
+The base secret (base/secret.yaml) remained unchanged.
 
-This ensures credentials are version-controlled safely via the overlay, not hardcoded in base.
+Kustomize automatically generates the runner-bitbucket-credentials secret on deployment.
 
-🚀 Deployment
-Once the above files were edited, we deployed directly from the values directory:
+🚀 Step 5 — Deploy the Autoscaler
+Apply everything from the values directory:
 
 bash
 Copy code
 cd runners-autoscaler/kustomize/values
 kubectl apply -k .
-This applied all manifests and created the following components:
+This creates:
 
 Namespace: bitbucket-runner-control-plane
 
-Deployments: runner-controller, runner-controller-cleaner
+Controller deployments and cleaner jobs
 
-ConfigMaps: job templates, runner configuration
+ConfigMaps and RBAC resources
 
-Secret: runner-bitbucket-credentials (patched automatically)
+Patched OAuth credentials secret
 
-Autoscaler ready to connect to Bitbucket
+Autoscaler ready for Bitbucket connection
 
-✅ Verification Steps
-🧩 Check control plane pods
+🔍 Step 6 — Verify Deployment
+🧩 Check controller pods
 bash
 Copy code
 kubectl get pods -n bitbucket-runner-control-plane
-Expected output:
+Expected:
 
 sql
 Copy code
-runner-controller-xxxxxx           Running
-runner-controller-cleaner-xxxxxx   Running
-📋 Controller logs
+runner-controller-xxxxx           Running
+runner-controller-cleaner-xxxxx   Running
+📜 View logs
 bash
 Copy code
 kubectl logs -l app=runner-controller -n bitbucket-runner-control-plane -f
-You should see:
+Sample successful output:
 
-csharp
+arduino
 Copy code
 INFO: Runner created on Bitbucket workspace: woodpeckernew
-INFO: Job created. status=runner-<uuid>
-✔ Successfully setup runner UUID {...} on workspace woodpeckernew
-🏃 Runner pods in action
+✔ Successfully setup runner UUID {...}
+🏃 Check active runners
 bash
 Copy code
 kubectl get pods -n default
-Example output:
+Example:
 
 sql
 Copy code
 runner-5972c0fe-880b-5eea-a0b7-0d5837d9d48b   2/2   Running   0   3m
-🧪 Sample Bitbucket Pipeline Test
-We used this file to confirm the runner execution:
-
-bitbucket-pipelines.yml
+🧪 Step 7 — Test the Runner with a Pipeline
+Create bitbucket-pipelines.yml in a repository under the same workspace:
 
 yaml
 Copy code
@@ -208,7 +233,7 @@ pipelines:
           - echo "💻 Hostname:" $(hostname)
           - sleep 5
           - echo "🎉 Pipeline executed successfully!"
-🟢 Result in Bitbucket UI:
+✅ Result in Bitbucket UI:
 
 sql
 Copy code
@@ -216,52 +241,48 @@ Copy code
 👤 User: root
 💻 Hostname: runner-xxxxxx
 🎉 Pipeline executed successfully!
-⚠️ Issues Encountered & Resolutions
+⚠️ Common Issues & Fixes
 Issue	Description	Resolution
-Invalid Grant (public consumer)	Bitbucket OAuth consumer was created as Public.	Recreated it as Private (Confidential).
-No callback URI defined	Bitbucket required a callback URL.	Added https://bitbucket.org/site/oauth2/callback.
-Missing privilege scopes	OAuth lacked runner:write permission.	Added runner:write, pipeline:write, repository:read, account:write.
-Namespace reserved error	Used bitbucket-runner-control-plane for runners.	Updated to namespace: default in runners_config.yaml.
-Invalid labels (Bad Request)	Used linux.shell and invalid characters.	Kept only gke.runner (Bitbucket adds linux & self.hosted automatically).
-Multiple platform labels	More than one platform label sent.	Removed platform labels from config.
-400 Bad Request during runner creation	Misconfigured secret values.	Fixed by editing values/kustomization.yaml correctly (base64 credentials).
-Cold start with min: 0	Runner took time to spin up after idle.	Kept min: 1 to maintain a warm standby runner.
+Invalid Grant (public consumer)	Created OAuth consumer as Public.	Recreate it as Private (Confidential).
+Missing callback URL	Bitbucket requires at least one callback.	Added https://bitbucket.org/site/oauth2/callback.
+Missing scopes	Lacked runner:write.	Added account:write, repository:read, pipeline:write, runner:write.
+Reserved namespace error	Runners spawned in control-plane namespace.	Changed to namespace: default in config.
+Invalid label format	Used invalid characters or linux.shell.	Kept only gke.runner.
+Multiple platform labels	Bitbucket enforces one platform label.	Removed additional platform labels.
+400 Bad Request (Secret misconfig)	Incorrect OAuth values.	Fixed via correct base64 in values/kustomization.yaml.
+Runner cold start delay	min: 0 deletes all runners.	Set min: 1 to keep a standby runner.
 
-🧾 Final Validation
-✅ Bitbucket Workspace UI:
-
+✅ Final Validation
+🧩 Bitbucket UI
 yaml
 Copy code
 Runner name: Runner group 1
 Runner UUID: {5972c0fe-880b-5eea-a0b7-0d5837d9d48b}
 Labels: self.hosted, linux, gke.runner
 Status: ONLINE
-✅ Cluster Pods:
-
+☸️ Cluster Pods
 bash
 Copy code
 kubectl get pods -A | grep runner
-bitbucket-runner-control-plane   runner-controller-xxxxxx           Running
-bitbucket-runner-control-plane   runner-controller-cleaner-xxxxxx   Running
+bitbucket-runner-control-plane   runner-controller-xxxxx           Running
+bitbucket-runner-control-plane   runner-controller-cleaner-xxxxx   Running
 default                          runner-5972c0fe-880b-5eea-a0b7-0d5837d9d48b   Running
-✅ Autoscaler Logs:
-Showed correct scaling activity and runner lifecycle.
-
 🧠 Summary
 Aspect	Status	Notes
-Bitbucket OAuth	✅ Working	Configured via Kustomize patch
-Runner Controller	✅ Running	Communicates with Bitbucket API
-Runner Pods	✅ Spawning dynamically	Lives in default namespace
-Pipeline Execution	✅ Successful	Verified via test pipeline
-Autoscaling	✅ Functional	Scales between 1–10 runners
+OAuth Integration	✅	Configured via Kustomize patches
+Controller Pods	✅	Running in control-plane namespace
+Runner Pods	✅	Dynamically spawned in default
+Pipeline Execution	✅	Verified via test pipeline
+Autoscaling	✅	Fully functional (1–10 runners)
 
-📘 Best Practices
-Keep one warm runner (min: 1) for faster first builds.
+💡 Best Practices
+Use Private (Confidential) OAuth consumers with correct scopes.
 
-Avoid editing base manifests — use overlays (values/).
+Keep labels simple (gke.runner) — Bitbucket adds platform ones automatically.
 
-Ensure OAuth consumer is private and has all required scopes.
+Avoid control-plane namespace for runners.
 
-Keep label names lowercase with dots only (gke.runner).
+Maintain at least 1 warm runner for faster startup.
 
-Avoid placing runners in the control-plane namespace.
+Store credentials via Kustomize overlay, not plain YAML or CLI secrets.
+
