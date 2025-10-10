@@ -1,3 +1,4 @@
+Location where the images are stored of bitbucket autoscaler: https://hub.docker.com/r/bitbucketpipelines/runners-autoscaler/tags
 # 🚀 Bitbucket Kubernetes Runner Autoscaler on GKE  
 ### *Accurate Implementation & Troubleshooting Documentation*
 
@@ -286,4 +287,146 @@ Avoid control-plane namespace for runners.
 Maintain at least 1 warm runner for faster startup.
 
 Store credentials via Kustomize overlay, not plain YAML or CLI secrets.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Deploy using API token instead of o-auth consumer
+GO to bitbucket account setting , click on security and then click on api token then click on create API token with scopes
+provide name and provide following permissions
+read:repository:bitbucket, read:workspace:bitbucket, read:runner:bitbucket and write:runner:bitbucket
+copy the token and save it
+Then only change which is required is in the kustomization file uncomment the api token patch and add the base64 email and token in this and then deploy it
+like following is the kustomization file
+cat kustomization.yaml 
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../base
+
+# Review the ./runners_config.yaml file, specially workspace uuid and labels.
+configMapGenerator:
+  - name: runners-autoscaler-config
+    files:
+      - runners_config.yaml
+    options:
+      disableNameSuffixHash: true
+
+# The namespace for the runners autoscaler resources.
+# It is not be the same namespace for runners pods which can be specified in the runners_config.yaml.
+namespace: bitbucket-runner-control-plane
+
+commonLabels:
+  app.kubernetes.io/part-of: runners-autoscaler
+
+images:
+  - name: bitbucketpipelines/runners-autoscaler
+    newTag: 3.9.0
+
+patches:
+  - target:
+      version: v1
+      kind: Secret
+      name: runner-bitbucket-credentials
+    # There are 3 options.
+    # Choose one of them, uncomment and specify the values.
+    # PS: Values must encoded in base64.
+    # 1) OAuth - Specify the oauth client id and secret.
+    # 2) API token - Specify the atlassian account email and atlassian api token.
+    # 3) App password - Specify the bitbucket username and bitbucket app password (deprecated).
+
+    patch: |-
+      ### Option 1 ###
+      #  - op: add
+      #   path: /data/bitbucketOauthClientId
+      #   value: "S0pmWHVoY0preXhUY2V4Z2pU"
+      # - op: add
+      #   path: /data/bitbucketOauthClientSecret
+      #   value: "eGJmcTRZTjhmQUtNdERnQmNaOTRZbVA3aHg3ZDNTQkQ="
+
+      ### Option 2 ###
+       - op: add
+         path: /data/atlassianAccountEmail
+         value: "YXR1bGdob2RtYXJlQGdtYWlsLmNvbQ=="
+       - op: add
+         path: /data/atlassianApiToken
+         value: "paste the api token"
+
+      ### Option 3 (deprecated) ###
+      # - op: add
+      #   path: /data/bitbucketUsername
+      #   value: ""
+      # - op: add
+      #   path: /data/bitbucketAppPassword
+      #   value: ""
+
+  - target:
+      version: v1
+      kind: Deployment
+      labelSelector: "inject=runners-autoscaler-envs"
+      # Uncomment the same option you've chosen for the Secret above.
+    patch: |-
+      ### Option 1 ###
+      # - op: replace
+      #   path: /spec/template/spec/containers/0/env
+      #   value:
+      #     - name: BITBUCKET_OAUTH_CLIENT_ID
+      #       valueFrom:
+      #         secretKeyRef:
+      #           key: bitbucketOauthClientId
+      #           name: runner-bitbucket-credentials
+      #     - name: BITBUCKET_OAUTH_CLIENT_SECRET
+      #       valueFrom:
+      #         secretKeyRef:
+      #           key: bitbucketOauthClientSecret
+      #           name: runner-bitbucket-credentials
+
+      ### Option 2 ###
+       - op: replace
+         path: /spec/template/spec/containers/0/env
+         value:
+           - name: ATLASSIAN_ACCOUNT_EMAIL
+             valueFrom:
+               secretKeyRef:
+                 key: atlassianAccountEmail
+                 name: runner-bitbucket-credentials
+           - name: ATLASSIAN_API_TOKEN
+             valueFrom:
+               secretKeyRef:
+                 key: atlassianApiToken
+                 name: runner-bitbucket-credentials
+
+      ### Option 3 (deprecated) ###
+      # - op: replace
+      #   path: /spec/template/spec/containers/0/env
+      #   value:
+      #     - name: BITBUCKET_USERNAME
+      #       valueFrom:
+      #         secretKeyRef:
+      #           key: bitbucketUsername
+      #           name: runner-bitbucket-credentials
+      #     - name: BITBUCKET_APP_PASSWORD
+      #       valueFrom:
+      #         secretKeyRef:
+      #           key: bitbucketAppPassword
+      #           name: runner-bitbucket-credentials
 
