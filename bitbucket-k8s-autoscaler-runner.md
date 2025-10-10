@@ -56,7 +56,8 @@ constants:
 
 groups:
   - name: "Runner group 1"
-    workspace: "{6321d246-a40a-4776-8497-372a41771e65}"  # we can get it by pasting url in browser https://api.bitbucket.org/2.0/workspaces/workspace_id , replace workspace id in url
+    workspace: "{6321d246-a40a-4776-8497-372a41771e65}"
+# we can get workspace id by pasting url in browser https://api.bitbucket.org/2.0/workspaces/workspace_id , replace workspace id in url
     labels:
       - "gke.runner"
     namespace: "default"  # Namespace where runner pods will be created
