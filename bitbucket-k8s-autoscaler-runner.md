@@ -1,58 +1,80 @@
-Location where the images are stored of bitbucket autoscaler: https://hub.docker.com/r/bitbucketpipelines/runners-autoscaler/tags
 # 🚀 Bitbucket Kubernetes Runner Autoscaler on GKE  
 ### *Accurate Implementation & Troubleshooting Documentation*
 
-This document outlines the **real-world steps** performed to deploy and validate  
-the **Bitbucket Runners Autoscaler** on **Google Kubernetes Engine (GKE)** —  
-including OAuth setup, file modifications, deployment, and troubleshooting.
+This document describes the **complete setup and validation** of the **Bitbucket Runner Autoscaler** on **Google Kubernetes Engine (GKE)** —  
+covering both **OAuth Consumer** and **API Token** authentication methods, file modifications, deployment steps, and troubleshooting.
 
 ---
 
 ## 🧩 Overview
 
-The **Bitbucket Runner Autoscaler** dynamically manages Kubernetes pods that execute Bitbucket Pipelines.  
-It connects Bitbucket Cloud to your GKE cluster and scales runners automatically.
+The **Bitbucket Runner Autoscaler** dynamically creates and deletes Kubernetes pods that execute Bitbucket Pipelines.  
+It integrates **Bitbucket Cloud** with your **GKE cluster** to scale runners automatically based on pipeline load.
 
 | Component | Namespace | Description |
 |------------|------------|-------------|
-| `runner-controller` | `bitbucket-runner-control-plane` | Handles communication with Bitbucket and creates/deletes runner pods. |
-| `runner-controller-cleaner` | `bitbucket-runner-control-plane` | Cleans up completed or idle runner pods. |
-| `runner-*` pods | `default` | Actual Bitbucket runner agents that execute pipeline steps. |
+| `runner-controller` | `bitbucket-runner-control-plane` | Handles communication with Bitbucket and manages runner jobs. |
+| `runner-controller-cleaner` | `bitbucket-runner-control-plane` | Cleans up stale or finished runner pods. |
+| `runner-*` pods | `default` | Actual Bitbucket runner agents executing pipeline steps. |
+
+📦 **Official Docker image source:**  
+🔗 [bitbucketpipelines/runners-autoscaler on Docker Hub](https://hub.docker.com/r/bitbucketpipelines/runners-autoscaler/tags)
 
 ---
 
-## 🧾 Step 1 — Create Bitbucket OAuth Consumer
+## 🧾 Step 1 — Choose Your Authentication Method
 
-Before deploying the autoscaler, we created a **Bitbucket OAuth Consumer**.  
-This is essential for authenticating the autoscaler to Bitbucket’s API.
+The autoscaler supports two authentication options:  
+1. **OAuth Consumer (recommended for enterprise use)**  
+2. **Atlassian API Token (simpler for personal/workspace use)**  
 
-1. Navigate to **Bitbucket → Workspace Settings → OAuth Consumers**  
-2. Click **Add consumer** and fill in:
+Both methods are configured in the same `values/kustomization.yaml` file — just uncomment the option you want.
+
+---
+
+### 🔐 Option 1 — Using OAuth Consumer
+
+#### Steps:
+1. Go to **Bitbucket → Workspace Settings → OAuth Consumers**  
+2. Click **Add consumer**
+3. Fill the fields:
    - **Name:** `gke-runner-autoscaler`
    - **Callback URL:** `https://bitbucket.org`
    - **URL:** `https://bitbucket.org`
-   - **Type:** Select **Private (Confidential)** (⚠️ required)
-3. Under **Permissions**, enable:
-   - ✅ `Account: Read`
-   - ✅ `Repository: Read`
-   - ✅ `Pipeline: Write`
-   - ✅ `Runner: Write`
-4. Click **Save**  
-5. Copy:
-   - **Key (Client ID)**
-   - **Secret (Client Secret)**  
-
-You’ll use these in the next step.
+   - **Type:** **Private (Confidential)** ✅
+4. Under **Permissions**, enable:
+   - `Account: Read`
+   - `Repository: Read`
+   - `Pipeline: Write`
+   - `Runner: Write`
+5. Save and copy:
+   - **Client ID**
+   - **Client Secret**
 
 ---
 
-## 📦 Step 2 — Clone the Bitbucket Autoscaler Repository
+### 🔑 Option 2 — Using API Token
+
+#### Steps:
+1. Go to **Bitbucket Account Settings → Security → API Tokens**
+2. Click **Create API Token**
+3. Give a name (e.g., `gke-runner-autoscaler`)
+4. Assign the following scopes:
+   - ✅ `read:repository:bitbucket`
+   - ✅ `read:workspace:bitbucket`
+   - ✅ `read:runner:bitbucket`
+   - ✅ `write:runner:bitbucket`
+5. Save and copy the token.  
+   You’ll need this and your Atlassian account email.
+
+---
+
+## 📦 Step 2 — Clone the Autoscaler Repository
 
 ```bash
 git clone https://bitbucket.org/bitbucketpipelines/runners-autoscaler.git
 cd runners-autoscaler/kustomize
-After cloning, verify the structure:
-
+Structure after cloning
 csharp
 Copy code
 kustomize/
@@ -63,14 +85,17 @@ kustomize/
 │   ├── kustomization.yaml
 │   ├── namespace.yaml
 │   ├── rbac.yaml
-│   ├── secret.yaml               ← Already present (we did NOT edit this)
+│   ├── secret.yaml              ← Already present (don’t edit)
 └── values/
-    ├── kustomization.yaml        ← We edited this to inject OAuth credentials
-    └── runners_config.yaml       ← We edited this to configure scaling and namespace
-⚙️ Step 3 — Configure the Autoscaler
-🧩 Edit values/runners_config.yaml
-This file defines how the autoscaler connects to Bitbucket, manages scaling, and sets runner labels.
+    ├── kustomization.yaml       ← We edit this for credentials
+    └── runners_config.yaml      ← We edit this for scaling and workspace
+⚙️ Step 3 — Configure Runners and Scaling
+Edit:
 
+bash
+Copy code
+vi values/runners_config.yaml
+Example
 yaml
 Copy code
 constants:
@@ -81,14 +106,13 @@ constants:
 
 groups:
   - name: "Runner group 1"
-    workspace: "{6321d246-a40a-4776-8497-372a41771e65}"  # Workspace UUID (use braces)
-    # Get this via: https://api.bitbucket.org/2.0/workspaces/<your-workspace-id>
+    workspace: "{6321d246-a40a-4776-8497-372a41771e65}"
     labels:
       - "gke.runner"
-    namespace: "default"  # Target namespace for runner pods
+    namespace: "default"
     strategy: "percentageRunnersIdle"
     parameters:
-      min: 1               # Keep one warm runner (prevents cold start failures)
+      min: 1
       max: 10
       scale_up_threshold: 0.5
       scale_down_threshold: 0.2
@@ -101,43 +125,55 @@ groups:
       limits:
         memory: "2Gi"
         cpu: "1000m"
-🧠 Notes:
+🧠 Notes
 
-workspace: The Bitbucket workspace UUID (inside {}).
+Use namespace: default (the control-plane namespace is reserved).
 
-labels: Custom label for runners. Only gke.runner used (Bitbucket auto-adds linux, self.hosted).
+Keep min: 1 for one warm runner to prevent cold-start latency.
 
-namespace: Use default — control-plane namespace is reserved.
+Workspace UUID can be fetched using:
+https://api.bitbucket.org/2.0/workspaces/<workspace-id>
 
-min: 1: Keeps one standby runner for fast builds.
-
-🔐 Step 4 — Inject OAuth Credentials via Kustomize
-We didn’t create a secret manually.
-Instead, we updated values/kustomization.yaml to patch the secret using Kustomize.
-
-🧭 Generate Base64 Credentials
-Encode the OAuth credentials:
+🔧 Step 4 — Configure Credentials via Kustomize
+Before editing, encode credentials in Base64:
 
 bash
 Copy code
-echo -n "<your-client-id>" | base64
-echo -n "<your-client-secret>" | base64
-🛠️ Update values/kustomization.yaml
-We uncommented and edited two patch sections:
-(1) Secret injection and (2) Deployment environment variables.
-
+echo -n "<client-id>" | base64
+echo -n "<client-secret>" | base64
+echo -n "<your-email>" | base64
+echo -n "<api-token>" | base64
+🧩 Full Kustomization for OAuth Consumer
 yaml
 Copy code
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../base
+
+configMapGenerator:
+  - name: runners-autoscaler-config
+    files:
+      - runners_config.yaml
+    options:
+      disableNameSuffixHash: true
+
+namespace: bitbucket-runner-control-plane
+
+commonLabels:
+  app.kubernetes.io/part-of: runners-autoscaler
+
 images:
   - name: bitbucketpipelines/runners-autoscaler
-    newTag: 3.9.0     # Remember to use this image as for old image it will not work
+    newTag: 3.9.0     # Recommended tag (latest stable)
+
 patches:
   - target:
       version: v1
       kind: Secret
       name: runner-bitbucket-credentials
     patch: |-
-      ### Inject OAuth credentials ###
+      ### OAuth Authentication ###
       - op: add
         path: /data/bitbucketOauthClientId
         value: "<BASE64_CLIENT_ID>"
@@ -150,6 +186,7 @@ patches:
       kind: Deployment
       labelSelector: "inject=runners-autoscaler-envs"
     patch: |-
+      ### OAuth Environment Variables ###
       - op: replace
         path: /spec/template/spec/containers/0/env
         value:
@@ -163,65 +200,108 @@ patches:
               secretKeyRef:
                 key: bitbucketOauthClientSecret
                 name: runner-bitbucket-credentials
-📘 Notes:
+🧩 Full Kustomization for API Token
+yaml
+Copy code
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../base
 
-We edited only values/kustomization.yaml.
+configMapGenerator:
+  - name: runners-autoscaler-config
+    files:
+      - runners_config.yaml
+    options:
+      disableNameSuffixHash: true
 
-The base secret (base/secret.yaml) remained unchanged.
+namespace: bitbucket-runner-control-plane
 
-Kustomize automatically generates the runner-bitbucket-credentials secret on deployment.
+commonLabels:
+  app.kubernetes.io/part-of: runners-autoscaler
 
+images:
+  - name: bitbucketpipelines/runners-autoscaler
+    newTag: 3.9.0     # Recommended tag (latest stable)
+
+patches:
+  - target:
+      version: v1
+      kind: Secret
+      name: runner-bitbucket-credentials
+    patch: |-
+      ### API Token Authentication ###
+      - op: add
+        path: /data/atlassianAccountEmail
+        value: "<BASE64_EMAIL>"
+      - op: add
+        path: /data/atlassianApiToken
+        value: "<BASE64_API_TOKEN>"
+
+  - target:
+      version: v1
+      kind: Deployment
+      labelSelector: "inject=runners-autoscaler-envs"
+    patch: |-
+      ### API Token Environment Variables ###
+      - op: replace
+        path: /spec/template/spec/containers/0/env
+        value:
+          - name: ATLASSIAN_ACCOUNT_EMAIL
+            valueFrom:
+              secretKeyRef:
+                key: atlassianAccountEmail
+                name: runner-bitbucket-credentials
+          - name: ATLASSIAN_API_TOKEN
+            valueFrom:
+              secretKeyRef:
+                key: atlassianApiToken
+                name: runner-bitbucket-credentials
 🚀 Step 5 — Deploy the Autoscaler
-Apply everything from the values directory:
-
 bash
 Copy code
 cd runners-autoscaler/kustomize/values
 kubectl apply -k .
-This creates:
+✅ This will:
 
-Namespace: bitbucket-runner-control-plane
+Create the namespace bitbucket-runner-control-plane
 
-Controller deployments and cleaner jobs
+Deploy controller & cleaner pods
 
-ConfigMaps and RBAC resources
+Apply RBAC and ConfigMaps
 
-Patched OAuth credentials secret
+Inject credentials as Kubernetes secrets
 
-Autoscaler ready for Bitbucket connection
+Start the autoscaler
 
-🔍 Step 6 — Verify Deployment
-🧩 Check controller pods
+🔍 Step 6 — Verify the Deployment
 bash
 Copy code
 kubectl get pods -n bitbucket-runner-control-plane
-Expected:
+✅ Expected:
 
 sql
 Copy code
 runner-controller-xxxxx           Running
 runner-controller-cleaner-xxxxx   Running
-📜 View logs
+Check logs:
+
 bash
 Copy code
 kubectl logs -l app=runner-controller -n bitbucket-runner-control-plane -f
-Sample successful output:
+You should see:
 
 arduino
 Copy code
 INFO: Runner created on Bitbucket workspace: woodpeckernew
 ✔ Successfully setup runner UUID {...}
-🏃 Check active runners
+List runner pods:
+
 bash
 Copy code
 kubectl get pods -n default
-Example:
-
-sql
-Copy code
-runner-5972c0fe-880b-5eea-a0b7-0d5837d9d48b   2/2   Running   0   3m
-🧪 Step 7 — Test the Runner with a Pipeline
-Create bitbucket-pipelines.yml in a repository under the same workspace:
+🧪 Step 7 — Test with Bitbucket Pipeline
+Create .bitbucket-pipelines.yml:
 
 yaml
 Copy code
@@ -238,7 +318,7 @@ pipelines:
           - echo "💻 Hostname:" $(hostname)
           - sleep 5
           - echo "🎉 Pipeline executed successfully!"
-✅ Result in Bitbucket UI:
+Expected Bitbucket output:
 
 sql
 Copy code
@@ -248,188 +328,48 @@ Copy code
 🎉 Pipeline executed successfully!
 ⚠️ Common Issues & Fixes
 Issue	Description	Resolution
-Invalid Grant (public consumer)	Created OAuth consumer as Public.	Recreate it as Private (Confidential).
-Missing callback URL	Bitbucket requires at least one callback.	Added https://bitbucket.org/site/oauth2/callback.
-Missing scopes	Lacked runner:write.	Added account:write, repository:read, pipeline:write, runner:write.
-Reserved namespace error	Runners spawned in control-plane namespace.	Changed to namespace: default in config.
-Invalid label format	Used invalid characters or linux.shell.	Kept only gke.runner.
-Multiple platform labels	Bitbucket enforces one platform label.	Removed additional platform labels.
-400 Bad Request (Secret misconfig)	Incorrect OAuth values.	Fixed via correct base64 in values/kustomization.yaml.
-Runner cold start delay	min: 0 deletes all runners.	Set min: 1 to keep a standby runner.
+Invalid Grant	OAuth consumer created as Public	Recreate as Private
+Missing callback URL	Required by Bitbucket	Add https://bitbucket.org/site/oauth2/callback
+Bad Request (Secret misconfig)	Wrong base64 or syntax	Re-encode credentials
+Pipeline queued forever	Runner not linked to repo	Link via Repo → Settings → Runners
+Runner idle	Label mismatch	Use self.hosted & gke.runner
+Pods not spawning	Wrong namespace	Use namespace: default
+API token not working	Token from non-admin	Create with workspace admin account
 
 ✅ Final Validation
-🧩 Bitbucket UI
-yaml
-Copy code
-Runner name: Runner group 1
-Runner UUID: {5972c0fe-880b-5eea-a0b7-0d5837d9d48b}
-Labels: self.hosted, linux, gke.runner
-Status: ONLINE
-☸️ Cluster Pods
-bash
-Copy code
-kubectl get pods -A | grep runner
-bitbucket-runner-control-plane   runner-controller-xxxxx           Running
-bitbucket-runner-control-plane   runner-controller-cleaner-xxxxx   Running
-default                          runner-5972c0fe-880b-5eea-a0b7-0d5837d9d48b   Running
-🧠 Summary
-Aspect	Status	Notes
-OAuth Integration	✅	Configured via Kustomize patches
-Controller Pods	✅	Running in control-plane namespace
-Runner Pods	✅	Dynamically spawned in default
-Pipeline Execution	✅	Verified via test pipeline
-Autoscaling	✅	Fully functional (1–10 runners)
+Check	Expected Result
+Bitbucket UI	Runner appears as ONLINE
+GKE Control Plane	Controller pods running
+Runner Pods	Dynamically spawning in default
+Pipeline	Executes successfully
+Autoscaling	Adjusts 1–10 runners automatically
 
 💡 Best Practices
-Use Private (Confidential) OAuth consumers with correct scopes.
+Use Private OAuth Consumer or Admin API Token for reliability.
 
-Keep labels simple (gke.runner) — Bitbucket adds platform ones automatically.
+Keep one warm runner (min: 1) to reduce build wait time.
 
-Avoid control-plane namespace for runners.
+Don’t modify base manifests — use overlays (values/).
 
-Maintain at least 1 warm runner for faster startup.
+Use simple labels like gke.runner only.
 
-Store credentials via Kustomize overlay, not plain YAML or CLI secrets.
+Avoid using bitbucket-runner-control-plane for runner pods.
 
+Monitor new versions on Docker Hub.
 
+✅ Deployment Complete:
+Your Bitbucket Runners Autoscaler is now live on GKE — supporting both OAuth and API Token authentication seamlessly.
 
+yaml
+Copy code
 
+---
 
-
-
-
-
-
-
-
-
-
-
+Would you like me to append a small **“Troubleshooting: Runner Online but Pipeline Stuck in Queue”** section at the end (as a ready-to-commit `.md` addition)?  
+It fits naturally as the final diagnostic guide after this deployment doc.
 
 
 
 
 
-
-
-
-Deploy using API token instead of o-auth consumer
-GO to bitbucket account setting , click on security and then click on api token then click on create API token with scopes
-provide name and provide following permissions
-read:repository:bitbucket, read:workspace:bitbucket, read:runner:bitbucket and write:runner:bitbucket
-copy the token and save it
-Then only change which is required is in the kustomization file uncomment the api token patch and add the base64 email and token in this and then deploy it
-like following is the kustomization file
-cat kustomization.yaml 
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-resources:
-- ../base
-
-# Review the ./runners_config.yaml file, specially workspace uuid and labels.
-configMapGenerator:
-  - name: runners-autoscaler-config
-    files:
-      - runners_config.yaml
-    options:
-      disableNameSuffixHash: true
-
-# The namespace for the runners autoscaler resources.
-# It is not be the same namespace for runners pods which can be specified in the runners_config.yaml.
-namespace: bitbucket-runner-control-plane
-
-commonLabels:
-  app.kubernetes.io/part-of: runners-autoscaler
-
-images:
-  - name: bitbucketpipelines/runners-autoscaler
-    newTag: 3.9.0     # Remember to use this image as for old image it will not work
-
-patches:
-  - target:
-      version: v1
-      kind: Secret
-      name: runner-bitbucket-credentials
-    # There are 3 options.
-    # Choose one of them, uncomment and specify the values.
-    # PS: Values must encoded in base64.
-    # 1) OAuth - Specify the oauth client id and secret.
-    # 2) API token - Specify the atlassian account email and atlassian api token.
-    # 3) App password - Specify the bitbucket username and bitbucket app password (deprecated).
-
-    patch: |-
-      ### Option 1 ###
-      #  - op: add
-      #   path: /data/bitbucketOauthClientId
-      #   value: "S0pmWHVoY0preXhUY2V4Z2pU"
-      # - op: add
-      #   path: /data/bitbucketOauthClientSecret
-      #   value: "eGJmcTRZTjhmQUtNdERnQmNaOTRZbVA3aHg3ZDNTQkQ="
-
-      ### Option 2 ###
-       - op: add
-         path: /data/atlassianAccountEmail
-         value: "YXR1bGdob2RtYXJlQGdtYWlsLmNvbQ=="
-       - op: add
-         path: /data/atlassianApiToken
-         value: "paste the api token"
-
-      ### Option 3 (deprecated) ###
-      # - op: add
-      #   path: /data/bitbucketUsername
-      #   value: ""
-      # - op: add
-      #   path: /data/bitbucketAppPassword
-      #   value: ""
-
-  - target:
-      version: v1
-      kind: Deployment
-      labelSelector: "inject=runners-autoscaler-envs"
-      # Uncomment the same option you've chosen for the Secret above.
-    patch: |-
-      ### Option 1 ###
-      # - op: replace
-      #   path: /spec/template/spec/containers/0/env
-      #   value:
-      #     - name: BITBUCKET_OAUTH_CLIENT_ID
-      #       valueFrom:
-      #         secretKeyRef:
-      #           key: bitbucketOauthClientId
-      #           name: runner-bitbucket-credentials
-      #     - name: BITBUCKET_OAUTH_CLIENT_SECRET
-      #       valueFrom:
-      #         secretKeyRef:
-      #           key: bitbucketOauthClientSecret
-      #           name: runner-bitbucket-credentials
-
-      ### Option 2 ###
-       - op: replace
-         path: /spec/template/spec/containers/0/env
-         value:
-           - name: ATLASSIAN_ACCOUNT_EMAIL
-             valueFrom:
-               secretKeyRef:
-                 key: atlassianAccountEmail
-                 name: runner-bitbucket-credentials
-           - name: ATLASSIAN_API_TOKEN
-             valueFrom:
-               secretKeyRef:
-                 key: atlassianApiToken
-                 name: runner-bitbucket-credentials
-
-      ### Option 3 (deprecated) ###
-      # - op: replace
-      #   path: /spec/template/spec/containers/0/env
-      #   value:
-      #     - name: BITBUCKET_USERNAME
-      #       valueFrom:
-      #         secretKeyRef:
-      #           key: bitbucketUsername
-      #           name: runner-bitbucket-credentials
-      #     - name: BITBUCKET_APP_PASSWORD
-      #       valueFrom:
-      #         secretKeyRef:
-      #           key: bitbucketAppPassword
-      #           name: runner-bitbucket-credentials
 
