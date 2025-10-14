@@ -1,6 +1,39 @@
-First deploy nginx controller and cert manager in the cluster
-Create issuer file which will be used in the ingress configuration as we dont have domain
+# ArgoCD & Image Updater Setup Guide
+
+This guide walks through deploying ArgoCD with cert-manager integration and configuring the ArgoCD Image Updater for automatic image updates from Google Container Registry.
+
+## Prerequisites
+
+- Kubernetes cluster up and running
+- `kubectl` configured to access your cluster
+- Helm 3 installed
+- NGINX Ingress Controller deployed
+- cert-manager deployed
+
+## Table of Contents
+
+1. [SSL Certificate Configuration](#ssl-certificate-configuration)
+2. [Deploy ArgoCD](#deploy-argocd)
+3. [Access ArgoCD UI](#access-argocd-ui)
+4. [Configure Git Repository](#configure-git-repository)
+5. [Install ArgoCD CLI](#install-argocd-cli)
+6. [Deploy ArgoCD Image Updater](#deploy-argocd-image-updater)
+7. [Configure Image Updater for GCR](#configure-image-updater-for-gcr)
+8. [Create Application](#create-application)
+
+---
+
+## SSL Certificate Configuration
+
+First, create a ClusterIssuer for Let's Encrypt staging certificates.
+
+### Create ClusterIssuer
+
+```bash
 vi issuer.yaml
+```
+
+```yaml
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
@@ -15,11 +48,24 @@ spec:
       - http01:
           ingress:
             class: nginx
-# create the values file to deploy the argocd using helm
+```
+
+```bash
+kubectl apply -f issuer.yaml
+```
+
+---
+
+## Deploy ArgoCD
+
+### Create Helm Values File
+
+```bash
 vi argocd-values.yaml
-# argocd-values.yaml
+```
+
+```yaml
 global:
-  # optional - used as default host in some templates
   domain: "argocd.35.244.2.22.nip.io"
 
 certificate:
@@ -31,10 +77,8 @@ certificate:
     name: letsencrypt-staging
 
 server:
-  # enable main UI ingress
   ingress:
     enabled: true
-    controller: generic
     controller: generic
     ingressClassName: "nginx"
     hostname: "argocd.35.244.2.22.nip.io"
@@ -49,8 +93,6 @@ server:
   ingressGrpc:
     enabled: true
     ingressClassName: "nginx"
-    # default hostname will fallback to grpc.<server.hostname> if blank,
-    # but we set explicit:
     hostname: "grpc-argocd.35.244.2.22.nip.io"
     path: /
     tls: true
@@ -58,16 +100,48 @@ server:
       kubernetes.io/ingress.class: "nginx"
       nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
       cert-manager.io/cluster-issuer: "letsencrypt-staging"
+      
   extraArgs:
     - --insecure
+```
 
-# Aplly the helm command to deploy argocd
+### Install ArgoCD via Helm
+
+```bash
+helm repo add argo https://argoproj.github.io/argo-helm
+helm repo update
 helm install argocd argo/argo-cd -n argocd --create-namespace -f argocd-values.yaml
+```
 
-# Acceess the UI
-On browser : http://argocd.35.244.2.22.nip.io
+---
 
-# Create the secret file with ssh 
+## Access ArgoCD UI
+
+Once deployed, access ArgoCD in your browser:
+
+```
+https://argocd.35.244.2.22.nip.io
+```
+
+**Default credentials:**
+- Username: `admin`
+- Password: Retrieve using the command below
+
+```bash
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+```
+
+---
+
+## Configure Git Repository
+
+### Create SSH Secret for Bitbucket
+
+```bash
+vi bitbucket-ssh-secret.yaml
+```
+
+```yaml
 apiVersion: v1
 kind: Secret
 metadata:
@@ -86,29 +160,56 @@ stringData:
     AAAEDA4fQFc0IdKiZPD6ByslOsw8XByXcnnH+g8lkWHAaAzptzEGNugCEUU0SF7yQ/D+4u
     mQSvWY6rxbEN3PB2+mHdAAAACnRla3Rvbi1ib3QBAgM=
     -----END OPENSSH PRIVATE KEY-----
+```
 
-  Apply the secret 
-  Add public key in the ssh section of butbucket 
+```bash
+kubectl apply -f bitbucket-ssh-secret.yaml
+```
 
-  # Install argocd cli
-  VERSION=v3.0.11
-  curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/download/$VERSION/argocd-linux-amd64
+### Add Public Key to Bitbucket
+
+Add the corresponding public SSH key to your Bitbucket repository settings under **SSH Keys**.
+
+---
+
+## Install ArgoCD CLI
+
+```bash
+VERSION=v3.0.11
+curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/download/$VERSION/argocd-linux-amd64
 chmod +x argocd
 sudo mv argocd /usr/local/bin/
 argocd version
+```
 
-Login using CLI
-get password: kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d 
-argocd login argocd.35.244.2.22.nip.io --username admin --password 8pXYjTPAoEb-ML8S --insecure
-argocd repo list > you can see the repo is automatically added, you can verify through UI as well
+### Login via CLI
 
-# Deploy image updater
-create values file
+```bash
+# Get the admin password
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+
+# Login to ArgoCD
+argocd login argocd.35.244.2.22.nip.io --username admin --password <YOUR_PASSWORD> --insecure
+
+# Verify repository is added
+argocd repo list
+```
+
+---
+
+## Deploy ArgoCD Image Updater
+
+### Create Values File
+
+```bash
 vi argocd-image-updater-values.yaml
+```
+
+```yaml
 config:
   argocd:
     serverAddress: "argocd-server.argocd.svc.cluster.local:443"
-    insecure: true   # because you passed --insecure in server
+    insecure: true
 
 rbac:
   enabled: true
@@ -116,12 +217,37 @@ rbac:
 serviceAccount:
   create: true
   name: argocd-image-updater
+```
 
-helm upgrade --install argocd-image-updater argo/argocd-image-updater   -n argocd -f argocd-image-updater-values.yaml
+### Install Image Updater
 
-Edit cm:  k edit cm argocd-image-updater-config -n argocd 
+```bash
+helm upgrade --install argocd-image-updater argo/argocd-image-updater \
+  -n argocd \
+  -f argocd-image-updater-values.yaml
+```
 
+---
+
+## Configure Image Updater for GCR
+
+### Edit ConfigMap
+
+```bash
+kubectl edit cm argocd-image-updater-config -n argocd
+```
+
+Add the following configuration:
+
+```yaml
 apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-image-updater-config
+  namespace: argocd
+  annotations:
+    meta.helm.sh/release-name: argocd-image-updater
+    meta.helm.sh/release-namespace: argocd
 data:
   artifact-registry.sh: |
     #!/bin/sh
@@ -143,79 +269,99 @@ data:
       ping: yes
       credsexpire: 15m
       default: true
-kind: ConfigMap
-metadata:
-  annotations:
-    meta.helm.sh/release-name: argocd-image-updater
-    meta.helm.sh/release-namespace: argocd
+```
 
-Add this in deployment of image updater as well as volume and volume mount
-k edit deploy argocd-image-updater -n argocd
+### Update Image Updater Deployment
+
+```bash
+kubectl edit deploy argocd-image-updater -n argocd
+```
+
+Add the following volumes and volume mounts:
+
+**Volume Mounts:**
+
+```yaml
 volumeMounts:
-        - mountPath: /app/config
-          name: image-updater-conf
-        - mountPath: /app/config/ssh
-          name: ssh-known-hosts
-        - mountPath: /app/.ssh
-          name: ssh-config
-        - mountPath: /tmp
-          name: tmp
-        - mountPath: /app/scripts
-          name: artifact-registry
-        - mountPath: /app/ssh-keys/id_rsa
-          name: ssh-signing-key
-          readOnly: true
-          subPath: sshPrivateKey
-volumes:
-      - configMap:
-          defaultMode: 493
-          items:
-          - key: artifact-registry.sh
-            path: artifact-registry.sh
-          name: argocd-image-updater-config
-          optional: true
-        name: artifact-registry
-      - configMap:
-          defaultMode: 420
-          items:
-          - key: registries.conf
-            path: registries.conf
-          - key: git.commit-message-template
-            path: commit.template
-          name: argocd-image-updater-config
-          optional: true
-        name: image-updater-conf
-      - configMap:
-          defaultMode: 420
-          name: argocd-ssh-known-hosts-cm
-          optional: true
-        name: ssh-known-hosts
-      - configMap:
-          defaultMode: 420
-          name: argocd-image-updater-ssh-config
-          optional: true
-        name: ssh-config
-      - name: ssh-signing-key
-        secret:
-          defaultMode: 420
-          optional: true
-          secretName: ssh-git-creds
-      - emptyDir: {}
-        name: tmp
+  - mountPath: /app/config
+    name: image-updater-conf
+  - mountPath: /app/config/ssh
+    name: ssh-known-hosts
+  - mountPath: /app/.ssh
+    name: ssh-config
+  - mountPath: /tmp
+    name: tmp
+  - mountPath: /app/scripts
+    name: artifact-registry
+  - mountPath: /app/ssh-keys/id_rsa
+    name: ssh-signing-key
+    readOnly: true
+    subPath: sshPrivateKey
+```
 
-  # Create application file
-  vi application.yaml
-  apiVersion: argoproj.io/v1alpha1
+**Volumes:**
+
+```yaml
+volumes:
+  - name: artifact-registry
+    configMap:
+      name: argocd-image-updater-config
+      defaultMode: 493
+      optional: true
+      items:
+        - key: artifact-registry.sh
+          path: artifact-registry.sh
+  - name: image-updater-conf
+    configMap:
+      name: argocd-image-updater-config
+      defaultMode: 420
+      optional: true
+      items:
+        - key: registries.conf
+          path: registries.conf
+        - key: git.commit-message-template
+          path: commit.template
+  - name: ssh-known-hosts
+    configMap:
+      name: argocd-ssh-known-hosts-cm
+      defaultMode: 420
+      optional: true
+  - name: ssh-config
+    configMap:
+      name: argocd-image-updater-ssh-config
+      defaultMode: 420
+      optional: true
+  - name: ssh-signing-key
+    secret:
+      secretName: bitbucket-ssh
+      defaultMode: 420
+      optional: true
+  - name: tmp
+    emptyDir: {}
+```
+
+---
+
+## Create Application
+
+### Create Application Manifest
+
+```bash
+vi application.yaml
+```
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: nginx-app
   namespace: argocd
   annotations:
-    argocd-image-updater.argoproj.io/image-list: nginx=gcr.io/nviz-playground/nginx-app #(Used nginx in this is the alias which we have used in the next annotations)
+    argocd-image-updater.argoproj.io/image-list: nginx=gcr.io/nviz-playground/nginx-app
     argocd-image-updater.argoproj.io/git-branch: main
     argocd-image-updater.argoproj.io/nginx.update-strategy: newest-build
     argocd-image-updater.argoproj.io/nginx.allow-tags: regexp:^.*
-    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/bitbucket-ssh # (we had created the ssh key we have directly used here to authenticate when commiting the kustomization)
+    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/bitbucket-ssh
     argocd-image-updater.argoproj.io/write-back-target: kustomization
 spec:
   project: default
@@ -231,5 +377,43 @@ spec:
       prune: true
     syncOptions:
       - ApplyOutOfSyncOnly=true
+```
 
-k apply -f application.yaml ? wait for some time to see the effect
+### Apply Application
+
+```bash
+kubectl apply -f application.yaml
+```
+
+Wait a few moments for the image updater to detect and process new images. Monitor the logs:
+
+```bash
+kubectl logs -n argocd -l app.kubernetes.io/name=argocd-image-updater -f
+```
+
+---
+
+## Verification
+
+Check the application status:
+
+```bash
+argocd app get nginx-app
+```
+
+View sync status in the ArgoCD UI or via CLI:
+
+```bash
+argocd app sync nginx-app
+```
+
+---
+
+## Notes
+
+- **nip.io**: This setup uses `nip.io` for DNS resolution without needing a real domain
+- **Let's Encrypt Staging**: Using staging environment to avoid rate limits during testing
+- **Image Update Strategy**: Configured to use `newest-build` strategy with regex tag matching
+- **Write-back Method**: Image updater commits kustomization changes directly to the Git repository
+
+For production environments, switch to Let's Encrypt production server and use a proper domain name.
