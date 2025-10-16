@@ -417,3 +417,76 @@ argocd app sync nginx-app
 - **Write-back Method**: Image updater commits kustomization changes directly to the Git repository
 
 For production environments, switch to Let's Encrypt production server and use a proper domain name.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Step 1: Create and Configure GCP Service Account
+PROJECT_ID=<YOUR_GCP_PROJECT_ID>
+
+# Create a dedicated GCP Service Account for Image Updater
+gcloud iam service-accounts create argocd-image-updater \
+  --project=${PROJECT_ID} \
+  --display-name="Argo CD Image Updater"
+
+# Grant read access to Artifact Registry
+gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+  --member="serviceAccount:argocd-image-updater@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --role="roles/artifactregistry.reader"
+
+🔗 Step 2: Bind the GCP SA to Kubernetes via Workload Identity
+
+Allow the Kubernetes ServiceAccount argocd-image-updater (in the argocd namespace) to impersonate the GCP Service Account.
+
+gcloud iam service-accounts add-iam-policy-binding \
+  argocd-image-updater@${PROJECT_ID}.iam.gserviceaccount.com \
+  --role roles/iam.workloadIdentityUser \
+  --member "serviceAccount:${PROJECT_ID}.svc.id.goog[argocd/argocd-image-updater]"
+
+🧾 Step 3: Annotate the Kubernetes Service Account
+
+Create or patch the Kubernetes ServiceAccount to include the GCP SA annotation.
+
+# file: argocd-image-updater-sa.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: argocd-image-updater
+  namespace: argocd
+  annotations:
+    iam.gke.io/gcp-service-account: argocd-image-updater@<YOUR_GCP_PROJECT_ID>.iam.gserviceaccount.com
+
+
+Apply it:
+
+kubectl apply -f argocd-image-updater-sa.yaml
+
