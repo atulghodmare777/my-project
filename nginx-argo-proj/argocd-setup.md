@@ -66,11 +66,11 @@ vi argocd-values.yaml
 
 ```yaml
 global:
-  domain: "argocd.35.244.2.22.nip.io"
+  domain: "stream.n7-sparks.n7net.in"
 
 certificate:
   enabled: true
-  domain: "argocd.35.244.2.22.nip.io"
+  domain: "stream.n7-sparks.n7net.in"
   issuer:
     group: cert-manager.io
     kind: ClusterIssuer
@@ -81,28 +81,32 @@ server:
     enabled: true
     controller: generic
     ingressClassName: "nginx"
-    hostname: "argocd.35.244.2.22.nip.io"
-    path: /
+    # hostname becomes the rule host
+    hostname: "stream.n7-sparks.n7net.in"
+    # desired path
+    path: /argocd
     pathType: Prefix
-    tls: true
+    # do not auto-enable TLS section in the generated Ingress (your example had no tls: block)
+    tls: false
     annotations:
-      kubernetes.io/ingress.class: "nginx"
+      # include cert-manager issuer annotation (matches your example)
       cert-manager.io/cluster-issuer: "letsencrypt-staging"
-      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-
-  ingressGrpc:
-    enabled: true
-    ingressClassName: "nginx"
-    hostname: "grpc-argocd.35.244.2.22.nip.io"
-    path: /
-    tls: true
-    annotations:
-      kubernetes.io/ingress.class: "nginx"
-      nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
-      cert-manager.io/cluster-issuer: "letsencrypt-staging"
-      
+      # keep other annotations out so generated ingress matches the example exactly
+    service:
+      port: 80
+  # keep extra server args if you still want insecure flag
   extraArgs:
     - --insecure
+    - --rootpath
+    - /argocd
+
+configs:
+  params:
+    server.basehref: "/argocd"
+    server.rootpath: "/argocd"
+    server.insecure: "true"
+  cm:
+    url: "https://stream.n7-sparks.n7net.in/argocd"
 ```
 
 ### Install ArgoCD via Helm
@@ -112,7 +116,6 @@ helm repo add argo https://argoproj.github.io/argo-helm
 helm repo update
 helm install argocd argo/argo-cd -n argocd --create-namespace -f argocd-values.yaml
 ```
-
 ---
 
 ## Access ArgoCD UI
