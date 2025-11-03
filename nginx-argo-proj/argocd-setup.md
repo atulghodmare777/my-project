@@ -233,6 +233,79 @@ helm upgrade --install argocd-image-updater argo/argocd-image-updater \
 ---
 
 ## Configure Image Updater for GCR
+# -----------------------------
+# 0) Set context
+# -----------------------------
+PROJECT_ID=nviz-playground
+CLUSTER=n7-playground-cluster
+LOCATION=asia-south1-c     # zone or region where your GKE cluster runs
+KSA_NS=argocd
+KSA_NAME=argocd-image-updater
+GSA_NAME=argocd-image-updater
+GSA_EMAIL="${GSA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+
+# -----------------------------
+# 1) Confirm WI is enabled & get workload pool
+# -----------------------------
+gcloud container clusters describe "$CLUSTER" --location "$LOCATION" \
+  --format='value(workloadIdentityConfig.workloadPool)'
+
+# Expect something like: nviz-playground.svc.id.goog
+WORKLOAD_POOL=$(gcloud container clusters describe "$CLUSTER" --location "$LOCATION" \
+  --format='value(workloadIdentityConfig.workloadPool)')
+echo "WORKLOAD_POOL = $WORKLOAD_POOL"
+
+# -----------------------------
+# 2) Ensure the GSA exists (create if missing)
+# -----------------------------
+gcloud iam service-accounts describe "$GSA_EMAIL" --project "$PROJECT_ID" || \
+gcloud iam service-accounts create "$GSA_NAME" \
+  --project "$PROJECT_ID" \
+  --display-name "Argo CD Image Updater"
+
+# -----------------------------
+# 3) Grant Artifact Registry read (project-wide is simplest)
+#    (You can scope to the specific repo if you prefer; see step 3b)
+# -----------------------------
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member "serviceAccount:${GSA_EMAIL}" \
+  --role "roles/artifactregistry.reader"
+
+# 3b) (Optional) Least privilege – grant only on the legacy GCR virtual repo:
+# gcloud artifacts repositories add-iam-policy-binding gcr.io \
+#   --location=us \
+#   --project="$PROJECT_ID" \
+#   --member="serviceAccount:${GSA_EMAIL}" \
+#   --role="roles/artifactregistry.reader"
+# 4) Bind KSA -> GSA for WI
+gcloud iam service-accounts add-iam-policy-binding "$GSA_EMAIL" \
+  --project "$PROJECT_ID" \
+  --member "serviceAccount:${WORKLOAD_POOL}[${KSA_NS}/${KSA_NAME}]" \
+  --role "roles/iam.workloadIdentityUser"
+
+
+# 5) Annotate the Kubernetes SA with the GSA
+
+kubectl annotate serviceaccount "${KSA_NAME}" \
+  -n "${KSA_NS}" \
+  iam.gke.io/gcp-service-account="${GSA_EMAIL}" \
+  --overwrite
+
+# Verify the annotation is present:
+kubectl get sa "${KSA_NAME}" -n "${KSA_NS}" -o yaml | grep iam.gke.io/gcp-service-account -n
+
+# -----------------------------
+# 6) Confirm the Artifact Registry repo (legacy GCR virtual repo) exists
+# -----------------------------
+gcloud artifacts repositories describe gcr.io \
+  --location=us \
+  --project="$PROJECT_ID"
+
+# -----------------------------
+# 7) Restart the image-updater to pick up creds
+# -----------------------------
+kubectl rollout restart deploy/argocd-image-updater -n "${KSA_NS}"
+
 
 ### Edit ConfigMap
 
@@ -449,47 +522,4 @@ For production environments, switch to Let's Encrypt production server and use a
 
 
 
-
-
-
-
-Step 1: Create and Configure GCP Service Account
-PROJECT_ID=<YOUR_GCP_PROJECT_ID>
-
-# Create a dedicated GCP Service Account for Image Updater
-gcloud iam service-accounts create argocd-image-updater \
-  --project=${PROJECT_ID} \
-  --display-name="Argo CD Image Updater"
-
-# Grant read access to Artifact Registry
-gcloud projects add-iam-policy-binding ${PROJECT_ID} \
-  --member="serviceAccount:argocd-image-updater@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --role="roles/artifactregistry.reader"
-
-🔗 Step 2: Bind the GCP SA to Kubernetes via Workload Identity
-
-Allow the Kubernetes ServiceAccount argocd-image-updater (in the argocd namespace) to impersonate the GCP Service Account.
-
-gcloud iam service-accounts add-iam-policy-binding \
-  argocd-image-updater@${PROJECT_ID}.iam.gserviceaccount.com \
-  --role roles/iam.workloadIdentityUser \
-  --member "serviceAccount:${PROJECT_ID}.svc.id.goog[argocd/argocd-image-updater]"
-
-🧾 Step 3: Annotate the Kubernetes Service Account
-
-Create or patch the Kubernetes ServiceAccount to include the GCP SA annotation.
-
-# file: argocd-image-updater-sa.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: argocd-image-updater
-  namespace: argocd
-  annotations:
-    iam.gke.io/gcp-service-account: argocd-image-updater@<YOUR_GCP_PROJECT_ID>.iam.gserviceaccount.com
-
-
-Apply it:
-
-kubectl apply -f argocd-image-updater-sa.yaml
 
