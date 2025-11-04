@@ -1,6 +1,8 @@
-# ArgoCD & Image Updater Setup Guide
+# 🚀 ArgoCD & Image Updater Setup Guide
 
 Complete step-by-step guide for deploying ArgoCD with cert-manager integration and configuring ArgoCD Image Updater for automatic image updates from Google Container Registry (GCR).
+
+---
 
 ## 📋 Prerequisites
 
@@ -28,6 +30,10 @@ Before starting, ensure you have:
 8. [Configure Image Updater for GCR](#8-configure-image-updater-for-gcr)
 9. [Create Application](#9-create-application)
 10. [Verification](#10-verification)
+11. [Backup & Disaster Recovery](#11-backup--disaster-recovery)
+12. [Common Commands Reference](#12-common-commands-reference)
+13. [Troubleshooting](#13-troubleshooting)
+14. [Production Recommendations](#14-production-recommendations)
 
 ---
 
@@ -42,6 +48,8 @@ kubectl get clusterissuer letsencrypt-staging
 **If exists:** You'll see the ClusterIssuer details. Skip to step 1.3
 
 **If not exists:** Proceed to step 1.2
+
+---
 
 ### 1.2 Create ClusterIssuer
 
@@ -72,6 +80,8 @@ Apply the manifest:
 kubectl apply -f issuer.yaml
 ```
 
+---
+
 ### 1.3 Verify ClusterIssuer
 
 ```bash
@@ -94,11 +104,15 @@ kubectl get namespace argocd
 
 **If not exists:** Proceed to step 2.2
 
+---
+
 ### 2.2 Create ArgoCD namespace
 
 ```bash
 kubectl create namespace argocd
 ```
+
+---
 
 ### 2.3 Check if Argo Helm repository is added
 
@@ -110,12 +124,16 @@ helm repo list | grep argo
 
 **If not exists:** Proceed to step 2.4
 
+---
+
 ### 2.4 Add Argo Helm repository
 
 ```bash
 helm repo add argo https://argoproj.github.io/argo-helm
 helm repo update
 ```
+
+---
 
 ### 2.5 Create ArgoCD Helm values file
 
@@ -162,6 +180,8 @@ configs:
 EOF
 ```
 
+---
+
 ### 2.6 Check if ArgoCD is already installed
 
 ```bash
@@ -176,17 +196,23 @@ helm upgrade argocd argo/argo-cd -n argocd -f argocd-values.yaml
 
 **If not exists:** Proceed to step 2.7
 
+---
+
 ### 2.7 Install ArgoCD
 
 ```bash
 helm install argocd argo/argo-cd -n argocd -f argocd-values.yaml
 ```
 
+---
+
 ### 2.8 Wait for ArgoCD to be ready
 
 ```bash
 kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
 ```
+
+---
 
 ### 2.9 Verify ArgoCD installation
 
@@ -207,6 +233,8 @@ kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.pas
 ```
 
 **Save this password!**
+
+---
 
 ### 3.2 Access ArgoCD UI
 
@@ -234,11 +262,15 @@ ls -la ~/.ssh/argocd_bitbucket
 
 **If not exists:** Proceed to step 4.2
 
+---
+
 ### 4.2 Generate SSH key for ArgoCD
 
 ```bash
 ssh-keygen -t ed25519 -C "argocd-bitbucket" -f ~/.ssh/argocd_bitbucket -N ""
 ```
+
+---
 
 ### 4.3 Display public key
 
@@ -248,6 +280,8 @@ cat ~/.ssh/argocd_bitbucket.pub
 
 Copy this public key output.
 
+---
+
 ### 4.4 Add public key to Bitbucket
 
 1. Go to your Bitbucket repository
@@ -256,6 +290,8 @@ Copy this public key output.
 4. Paste the public key from step 4.3
 5. Give it a label like "ArgoCD Access"
 6. Click **Add key**
+
+---
 
 ### 4.5 Check if SSH secret exists in ArgoCD
 
@@ -267,9 +303,11 @@ kubectl get secret bitbucket-ssh -n argocd
 
 **If not exists:** Proceed to step 4.6
 
+---
+
 ### 4.6 Create SSH secret for Bitbucket
 
-Create the secret manifest:
+**Option 1:** Create the secret manifest using newly generated key:
 
 ```bash
 cat > bitbucket-ssh-secret.yaml <<EOF
@@ -287,8 +325,11 @@ stringData:
 $(cat ~/.ssh/argocd_bitbucket | sed 's/^/    /')
 EOF
 ```
-OR If you have currently existing ssh key paste it directly
+
+**Option 2:** If you have currently existing SSH key, paste it directly:
+
 ```bash
+cat > bitbucket-ssh-secret.yaml <<EOF
 apiVersion: v1
 kind: Secret
 metadata:
@@ -307,6 +348,7 @@ stringData:
     AAAEDA4fQFc0IdKiZPD6ByslOsw8XByXcnnH+g8lkWHAaAzptzEGNugCEUU0SF7yQ/D+4u
     mQSvWY6rxbEN3PB2+mHdAAAACnRla3Rvbi1ib3QBAgM=
     -----END OPENSSH PRIVATE KEY-----
+EOF
 ```
 
 Apply the secret:
@@ -314,6 +356,8 @@ Apply the secret:
 ```bash
 kubectl apply -f bitbucket-ssh-secret.yaml
 ```
+
+---
 
 ### 4.7 Verify secret creation
 
@@ -335,6 +379,8 @@ argocd version --client
 
 **If not installed:** Proceed to step 5.2
 
+---
+
 ### 5.2 Install ArgoCD CLI
 
 ```bash
@@ -350,6 +396,8 @@ Verify installation:
 argocd version --client
 ```
 
+---
+
 ### 5.3 Login to ArgoCD via CLI
 
 Get the admin password:
@@ -364,6 +412,8 @@ Login (replace with your domain):
 ```bash
 argocd login stream.n7-sparks.n7net.in/argocd --username admin --password "$ARGOCD_PASSWORD" --insecure
 ```
+
+---
 
 ### 5.4 Verify repository connection
 
@@ -387,6 +437,8 @@ helm list -n argocd | grep argocd-image-updater
 
 **If not exists:** Proceed to step 6.2
 
+---
+
 ### 6.2 Create Image Updater values file
 
 ```bash
@@ -405,11 +457,15 @@ serviceAccount:
 EOF
 ```
 
+---
+
 ### 6.3 Install ArgoCD Image Updater
 
 ```bash
 helm upgrade --install argocd-image-updater argo/argocd-image-updater -n argocd -f argocd-image-updater-values.yaml
 ```
+
+---
 
 ### 6.4 Verify Image Updater installation
 
@@ -438,6 +494,8 @@ export GSA_NAME="argocd-image-updater"
 export GSA_EMAIL="${GSA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 ```
 
+---
+
 ### 7.2 Check if Workload Identity is enabled on cluster
 
 ```bash
@@ -459,6 +517,8 @@ export WORKLOAD_POOL=$(gcloud container clusters describe "$CLUSTER" --location 
 echo "WORKLOAD_POOL = $WORKLOAD_POOL"
 ```
 
+---
+
 ### 7.3 Check if Google Service Account exists
 
 ```bash
@@ -469,6 +529,8 @@ gcloud iam service-accounts describe "$GSA_EMAIL" --project "$PROJECT_ID"
 
 **If not exists:** You'll see an error. Proceed to step 7.4
 
+---
+
 ### 7.4 Create Google Service Account
 
 ```bash
@@ -476,6 +538,8 @@ gcloud iam service-accounts create "$GSA_NAME" \
   --project "$PROJECT_ID" \
   --display-name "ArgoCD Image Updater"
 ```
+
+---
 
 ### 7.5 Check if Artifact Registry reader role is granted
 
@@ -489,6 +553,8 @@ gcloud projects get-iam-policy "$PROJECT_ID" \
 **If output shows `roles/artifactregistry.reader`:** Role already granted. Skip to step 7.7
 
 **If output is empty:** Proceed to step 7.6
+
+---
 
 ### 7.6 Grant Artifact Registry reader role
 
@@ -509,6 +575,8 @@ gcloud artifacts repositories add-iam-policy-binding gcr.io \
   --role="roles/artifactregistry.reader"
 ```
 
+---
+
 ### 7.7 Check if Workload Identity binding exists
 
 ```bash
@@ -521,6 +589,8 @@ gcloud iam service-accounts get-iam-policy "$GSA_EMAIL" \
 
 **If output is empty:** Proceed to step 7.8
 
+---
+
 ### 7.8 Bind Kubernetes SA to Google SA
 
 ```bash
@@ -529,6 +599,8 @@ gcloud iam service-accounts add-iam-policy-binding "$GSA_EMAIL" \
   --member "serviceAccount:${WORKLOAD_POOL}[${KSA_NS}/${KSA_NAME}]" \
   --role "roles/iam.workloadIdentityUser"
 ```
+
+---
 
 ### 7.9 Check if Kubernetes SA has Workload Identity annotation
 
@@ -540,6 +612,8 @@ kubectl get sa "$KSA_NAME" -n "$KSA_NS" -o jsonpath='{.metadata.annotations.iam\
 
 **If output is empty:** Proceed to step 7.10
 
+---
+
 ### 7.10 Annotate Kubernetes Service Account
 
 ```bash
@@ -548,6 +622,8 @@ kubectl annotate serviceaccount "${KSA_NAME}" \
   iam.gke.io/gcp-service-account="${GSA_EMAIL}" \
   --overwrite
 ```
+
+---
 
 ### 7.11 Verify annotation
 
@@ -559,6 +635,8 @@ Expected output:
 ```
 iam.gke.io/gcp-service-account: argocd-image-updater@nviz-playground.iam.gserviceaccount.com
 ```
+
+---
 
 ### 7.12 Verify Artifact Registry repository exists
 
@@ -589,6 +667,8 @@ kubectl get configmap argocd-image-updater-config -n argocd -o yaml > argocd-ima
 Then proceed to step 8.2 to update it.
 
 **If not exists:** Proceed to step 8.2
+
+---
 
 ### 8.2 Create/Update ConfigMap with GCR authentication
 
@@ -632,6 +712,8 @@ Apply the ConfigMap:
 ```bash
 kubectl apply -f argocd-image-updater-config.yaml
 ```
+
+---
 
 ### 8.3 Update Image Updater Deployment with volumes
 
@@ -709,17 +791,23 @@ kubectl edit deployment argocd-image-updater -n argocd
 
 And add the volumes and volumeMounts sections from the patch file above.
 
+---
+
 ### 8.4 Restart Image Updater deployment
 
 ```bash
 kubectl rollout restart deployment/argocd-image-updater -n argocd
 ```
 
+---
+
 ### 8.5 Wait for rollout to complete
 
 ```bash
 kubectl rollout status deployment/argocd-image-updater -n argocd
 ```
+
+---
 
 ### 8.6 Verify Image Updater logs
 
@@ -759,6 +847,8 @@ images:
     newTag: latest
 ```
 
+---
+
 ### 9.2 Check if application already exists
 
 ```bash
@@ -774,6 +864,8 @@ kubectl delete application nginx-app -n argocd
 Then proceed to step 9.3.
 
 **If not exists:** Proceed to step 9.3
+
+---
 
 ### 9.3 Create Application manifest
 
@@ -823,11 +915,15 @@ spec:
 EOF
 ```
 
+---
+
 ### 9.4 Apply Application
 
 ```bash
 kubectl apply -f application.yaml
 ```
+
+---
 
 ### 9.5 Verify Application creation
 
@@ -856,12 +952,16 @@ You should see:
 - Sync Status
 - Last Sync information
 
+---
+
 ### 10.2 Check Application in ArgoCD UI
 
 1. Open ArgoCD UI: `https://stream.n7-sparks.n7net.in/argocd`
 2. Login with admin credentials
 3. You should see `nginx-app` application
 4. Click on it to see the resource tree
+
+---
 
 ### 10.3 Monitor Image Updater logs
 
@@ -874,6 +974,8 @@ You should see logs indicating:
 - Image checks being performed
 - Write-back operations (if new images are found)
 
+---
+
 ### 10.4 Force sync application
 
 If the application is not synced:
@@ -881,6 +983,8 @@ If the application is not synced:
 ```bash
 argocd app sync nginx-app
 ```
+
+---
 
 ### 10.5 Check if Image Updater can access GCR
 
@@ -916,6 +1020,8 @@ Exit the pod:
 exit
 ```
 
+---
+
 ### 10.6 Check deployed resources
 
 Check if the application resources are deployed:
@@ -925,6 +1031,8 @@ kubectl get all -n default -l app=nginx-app
 ```
 
 Replace `app=nginx-app` with appropriate labels from your manifests.
+
+---
 
 ### 10.7 Push a new image to test auto-update
 
@@ -949,7 +1057,295 @@ You should see:
 
 ---
 
-## 📝 Common Commands Reference
+## 11. Backup & Disaster Recovery
+
+### 11.1 Create Backup
+
+#### Check ArgoCD version
+
+```bash
+argocd version
+```
+
+#### Create backup directory
+
+```bash
+mkdir -p backup
+```
+
+#### Backup ArgoCD Helm values
+
+```bash
+helm get values argocd -n argocd > backup/argocd-values.backup.yaml
+```
+
+#### Backup Image Updater Helm values
+
+```bash
+helm get values argocd-image-updater -n argocd > backup/argocd-image-updater-values.backup.yaml
+```
+
+#### Export ArgoCD configuration
+
+```bash
+argocd admin export -n argocd > backup/argocd-backup-$(date +%F).yaml
+```
+
+---
+
+### 11.2 Restore ArgoCD
+
+#### Step 1: Add Argo Helm repository
+
+```bash
+helm repo add argo https://argoproj.github.io/argo-helm || true
+helm repo update
+```
+
+---
+
+#### Step 2: Restore ArgoCD installation
+
+```bash
+helm upgrade --install argocd argo/argo-cd -n argocd -f backup/argocd-values.backup.yaml
+```
+
+---
+
+#### Step 3: Sanitize and import ArgoCD backup
+
+```bash
+yq 'del(.items[] | select(.kind=="Secret" and .metadata.name=="argocd-secret").data."admin.password") |
+    del(.items[] | select(.kind=="Secret" and .metadata.name=="argocd-secret").data."admin.passwordMtime")' \
+  backup/argocd-backup-2025-11-04.yaml > /tmp/argocd-backup-sanitized.yaml
+
+argocd admin import -n argocd /tmp/argocd-backup-sanitized.yaml
+```
+
+---
+
+#### Step 4: Verify and restore Bitbucket SSH secret
+
+```bash
+kubectl get secret bitbucket-ssh -n argocd
+```
+
+Create/apply if missing:
+
+```bash
+kubectl apply -f backup/bitbucket-ssh-secret.yaml
+```
+
+---
+
+#### Step 5: Restore ArgoCD Image Updater
+
+```bash
+helm upgrade --install argocd-image-updater argo/argocd-image-updater \
+  -n argocd -f backup/argocd-image-updater-values.backup.yaml
+```
+
+---
+
+#### Step 6: Patch ConfigMap for GCR authentication
+
+```bash
+kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-image-updater-config
+  namespace: argocd
+data:
+  artifact-registry.sh: |
+    #!/bin/sh
+    ACCESS_TOKEN=$(wget --header 'Metadata-Flavor: Google' \
+      http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token \
+      -q -O - | grep -Eo '"access_token":.*?[^\\]",' | cut -d '"' -f 4)
+    echo "oauth2accesstoken:${ACCESS_TOKEN}"
+
+  interval: "1m"
+  kube.events: "false"
+  log.level: "info"
+
+  registries.conf: |
+    registries:
+    - name: Google Container Registry
+      prefix: gcr.io
+      api_url: https://gcr.io
+      credentials: ext:/app/scripts/artifact-registry.sh
+      defaultns: nviz-playground
+      insecure: no
+      ping: yes
+      credsexpire: 15m
+      default: true
+EOF
+```
+
+---
+
+#### Step 7: Patch Image Updater Deployment - Add artifact-registry volume
+
+```bash
+kubectl patch deployment argocd-image-updater -n argocd --type='json' -p='[
+  {"op":"add","path":"/spec/template/spec/volumes/-","value":{
+    "name":"artifact-registry",
+    "configMap":{
+      "name":"argocd-image-updater-config",
+      "defaultMode":493,
+      "items":[{"key":"artifact-registry.sh","path":"artifact-registry.sh"}]
+    }
+  }}
+]'
+```
+
+---
+
+#### Step 8: Patch Image Updater Deployment - Add volumeMount
+
+```bash
+kubectl patch deployment argocd-image-updater -n argocd --type='json' -p='[
+  {"op":"add","path":"/spec/template/spec/containers/0/volumeMounts/-","value":{
+    "mountPath":"/app/scripts",
+    "name":"artifact-registry"
+  }}
+]'
+```
+
+---
+
+#### Step 9: Restart Image Updater deployment
+
+```bash
+kubectl rollout restart deployment/argocd-image-updater -n argocd
+```
+
+---
+
+#### Step 10: Verify Workload Identity annotation
+
+```bash
+kubectl get sa argocd-image-updater -n argocd -o jsonpath='{.metadata.annotations.iam\.gke\.io/gcp-service-account}'; echo
+```
+
+If empty, annotate:
+
+```bash
+export PROJECT_ID="nviz-playground"
+export KSA_NS="argocd"
+export KSA_NAME="argocd-image-updater"
+export GSA_NAME="argocd-image-updater"
+export GSA_EMAIL="${GSA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+
+kubectl annotate serviceaccount "${KSA_NAME}" -n "${KSA_NS}" \
+  iam.gke.io/gcp-service-account="${GSA_EMAIL}" --overwrite
+```
+
+---
+
+#### Step 11: Check IAM binding
+
+```bash
+export CLUSTER="n7-playground-cluster"
+export LOCATION="asia-south1-c"
+export WORKLOAD_POOL=$(gcloud container clusters describe "$CLUSTER" --location "$LOCATION" --format='value(workloadIdentityConfig.workloadPool)')
+
+gcloud iam service-accounts get-iam-policy "$GSA_EMAIL" --project "$PROJECT_ID" \
+  --format="json" | grep -q roles/iam.workloadIdentityUser && echo "binding: OK" || echo "binding: MISSING"
+```
+
+If missing, add:
+
+```bash
+gcloud iam service-accounts add-iam-policy-binding "$GSA_EMAIL" \
+  --member "serviceAccount:${WORKLOAD_POOL}[${KSA_NS}/${KSA_NAME}]" \
+  --role "roles/iam.workloadIdentityUser" \
+  --project "$PROJECT_ID"
+```
+
+---
+
+#### Step 12: Check Artifact Registry reader role (Optional)
+
+Check whether kubeip-gcp-sa already has Artifact Registry reader:
+
+```bash
+gcloud projects get-iam-policy nviz-playground \
+  --flatten="bindings[].members" \
+  --format="table(bindings.role,bindings.members)" \
+  --filter="bindings.members:serviceAccount:kubeip-gcp-sa@nviz-playground.iam.gserviceaccount.com AND bindings.role:roles/artifactregistry.reader"
+```
+
+If the table is empty, then ADD the role:
+
+```bash
+gcloud projects add-iam-policy-binding nviz-playground \
+  --member="serviceAccount:kubeip-gcp-sa@nviz-playground.iam.gserviceaccount.com" \
+  --role="roles/artifactregistry.reader"
+```
+
+---
+
+#### Step 13: Install ArgoCD CLI
+
+```bash
+VERSION=v3.1.9 #make it same as argocd version
+curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/download/$VERSION/argocd-linux-amd64
+chmod +x argocd
+sudo mv argocd /usr/local/bin/
+```
+
+Verify installation:
+
+```bash
+argocd version --client
+```
+
+---
+
+#### Step 14: Login ArgoCD using CLI
+
+```bash
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo
+
+argocd login 35-244-2-22.nip.io \
+  --username admin \
+  --password 'DtEahe93LIKB7Yip' \
+  --insecure \
+  --grpc-web
+```
+
+---
+
+#### Step 15: Final checks
+
+Check UI/Ingress:
+
+```bash
+kubectl get ing -n argocd
+```
+
+Check Apps & sync:
+
+```bash
+argocd app list
+
+argocd app get nginx-app
+
+argocd app sync nginx-app   # if OutOfSync
+```
+
+Check Image Updater logs + token script:
+
+```bash
+kubectl logs -n argocd deploy/argocd-image-updater --tail=200
+
+kubectl exec -it -n argocd deploy/argocd-image-updater -- sh -c '/app/scripts/artifact-registry.sh'
+```
+
+---
+
+## 12. Common Commands Reference
 
 ### ArgoCD Commands
 
@@ -979,6 +1375,8 @@ argocd repo list
 argocd repo add git@bitbucket.org:YourOrg/your-repo.git --ssh-private-key-path ~/.ssh/argocd_bitbucket
 ```
 
+---
+
 ### Kubernetes Commands
 
 ```bash
@@ -1001,6 +1399,8 @@ kubectl describe deployment argocd-image-updater -n argocd
 kubectl get sa argocd-image-updater -n argocd -o yaml
 ```
 
+---
+
 ### GCP Commands
 
 ```bash
@@ -1019,7 +1419,7 @@ gcloud artifacts docker tags list gcr.io/$PROJECT_ID/nginx-app
 
 ---
 
-## 🔧 Troubleshooting
+## 13. Troubleshooting
 
 ### Issue 1: Image Updater cannot authenticate to GCR
 
@@ -1038,6 +1438,8 @@ kubectl logs -n argocd -l app.kubernetes.io/name=argocd-image-updater --tail=100
 
 **Fix:** Re-run steps 7.8 and 7.10, then restart the deployment (step 8.4)
 
+---
+
 ### Issue 2: Image Updater not detecting new images
 
 **Check:**
@@ -1050,10 +1452,12 @@ kubectl get cm argocd-image-updater-config -n argocd -o yaml
 kubectl logs -n argocd -l app.kubernetes.io/name=argocd-image-updater -f
 ```
 
-**Fix:** 
+**Fix:**
 - Verify the image exists in GCR
 - Check the annotation in application manifest (step 9.3)
 - Restart Image Updater (step 8.4)
+
+---
 
 ### Issue 3: Git write-back failing
 
@@ -1069,6 +1473,8 @@ ssh -T git@bitbucket.org
 ```
 
 **Fix:** Ensure the SSH key is added to Bitbucket (step 4.4)
+
+---
 
 ### Issue 4: Application not syncing
 
@@ -1094,7 +1500,7 @@ argocd repo list
 
 ---
 
-## 🚀 Production Recommendations
+## 14. Production Recommendations
 
 Before deploying to production:
 
@@ -1131,172 +1537,25 @@ Before deploying to production:
 
 ---
 
-##
+## 📚 Additional Resources
 
+- [ArgoCD Official Documentation](https://argo-cd.readthedocs.io/)
+- [ArgoCD Image Updater Documentation](https://argocd-image-updater.readthedocs.io/)
+- [GCP Workload Identity Documentation](https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity)
+- [cert-manager Documentation](https://cert-manager.io/docs/)
 
+---
 
-## Backup 
-cmd: argocd version
-create backup directory
-helm get values argocd -n argocd > backup/argocd-values.backup.yaml
+## 📝 Notes
 
-helm get values argocd-image-updater -n argocd > backup/argocd-image-updater-values.backup.yaml
+- Always backup your configuration before making changes
+- Test disaster recovery procedures regularly
+- Keep your ArgoCD and Image Updater versions up to date
+- Monitor logs for any authentication or sync issues
+- Use appropriate RBAC policies for production environments
 
-argocd admin export -n argocd > backup/argocd-backup-$(date +%F).yaml
+---
 
-## To restore the argocd
-helm repo add argo https://argoproj.github.io/argo-helm || true
+**Last Updated:** November 2025
 
-helm repo update
-
-helm upgrade --install argocd argo/argo-cd -n argocd -f backup/argocd-values.backup.yaml
-
-yq 'del(.items[] | select(.kind=="Secret" and .metadata.name=="argocd-secret").data."admin.password") |
-    del(.items[] | select(.kind=="Secret" and .metadata.name=="argocd-secret").data."admin.passwordMtime")' \
-  backup/argocd-backup-2025-11-04.yaml > /tmp/argocd-backup-sanitized.yaml
-
-argocd admin import -n argocd /tmp/argocd-backup-sanitized.yaml
-
-kubectl get secret bitbucket-ssh -n argocd
-
-Create/apply if missing
-
-kubectl apply -f backup/bitbucket-ssh-secret.yaml
-
-helm upgrade --install argocd-image-updater argo/argocd-image-updater \
-  -n argocd -f backup/argocd-image-updater-values.backup.yaml
-
-patch cm as below
-
-kubectl apply -f - <<'EOF'
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: argocd-image-updater-config
-  namespace: argocd
-data:
-  artifact-registry.sh: |
-    #!/bin/sh
-    ACCESS_TOKEN=$(wget --header 'Metadata-Flavor: Google' \
-      http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token \
-      -q -O - | grep -Eo '"access_token":.*?[^\\]",' | cut -d '"' -f 4)
-    echo "oauth2accesstoken:${ACCESS_TOKEN}"
-
-  interval: "1m"
-  kube.events: "false"
-  log.level: "info"
-
-  registries.conf: |
-    registries:
-    - name: Google Container Registry
-      prefix: gcr.io
-      api_url: https://gcr.io
-      credentials: ext:/app/scripts/artifact-registry.sh
-      defaultns: nviz-playground
-      insecure: no
-      ping: yes
-      credsexpire: 15m
-      default: true
-EOF
-
-
-kubectl patch deployment argocd-image-updater -n argocd --type='json' -p='[
-  {"op":"add","path":"/spec/template/spec/volumes/-","value":{
-    "name":"artifact-registry",
-    "configMap":{
-      "name":"argocd-image-updater-config",
-      "defaultMode":493,
-      "items":[{"key":"artifact-registry.sh","path":"artifact-registry.sh"}]
-    }
-  }}
-]'
-
-
-kubectl patch deployment argocd-image-updater -n argocd --type='json' -p='[
-  {"op":"add","path":"/spec/template/spec/containers/0/volumeMounts/-","value":{
-    "mountPath":"/app/scripts",
-    "name":"artifact-registry"
-  }}
-]'
-
-
-kubectl rollout restart deployment/argocd-image-updater -n argocd
-
-kubectl get sa argocd-image-updater -n argocd -o jsonpath='{.metadata.annotations.iam\.gke\.io/gcp-service-account}'; echo
-
-If empty, annotate:
-
-export PROJECT_ID="nviz-playground"
-export KSA_NS="argocd"
-export KSA_NAME="argocd-image-updater"
-export GSA_NAME="argocd-image-updater"
-export GSA_EMAIL="${GSA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
-
-kubectl annotate serviceaccount "${KSA_NAME}" -n "${KSA_NS}" \
-  iam.gke.io/gcp-service-account="${GSA_EMAIL}" --overwrite
-
-Check IAM binding:
-
-export CLUSTER="n7-playground-cluster"
-export LOCATION="asia-south1-c"
-export WORKLOAD_POOL=$(gcloud container clusters describe "$CLUSTER" --location "$LOCATION" --format='value(workloadIdentityConfig.workloadPool)')
-
-gcloud iam service-accounts get-iam-policy "$GSA_EMAIL" --project "$PROJECT_ID" \
-  --format="json" | grep -q roles/iam.workloadIdentityUser && echo "binding: OK" || echo "binding: MISSING"
-
-If missing, add:
-
-gcloud iam service-accounts add-iam-policy-binding "$GSA_EMAIL" \
-  --member "serviceAccount:${WORKLOAD_POOL}[${KSA_NS}/${KSA_NAME}]" \
-  --role "roles/iam.workloadIdentityUser" \
-  --project "$PROJECT_ID"
-
-# CHECK whether kubeip-gcp-sa already has Artifact Registry reader
-gcloud projects get-iam-policy nviz-playground \
-  --flatten="bindings[].members" \
-  --format="table(bindings.role,bindings.members)" \
-  --filter="bindings.members:serviceAccount:kubeip-gcp-sa@nviz-playground.iam.gserviceaccount.com AND bindings.role:roles/artifactregistry.reader"
-
-# If the table is empty, then ADD the role:
-gcloud projects add-iam-policy-binding nviz-playground \
-  --member="serviceAccount:kubeip-gcp-sa@nviz-playground.iam.gserviceaccount.com" \
-  --role="roles/artifactregistry.reader"
-
-Install argocd cli
-
-VERSION=v3.1.9 #make it same as argocd version
-curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/download/$VERSION/argocd-linux-amd64
-chmod +x argocd
-sudo mv argocd /usr/local/bin/
-Verify installation:
-
-argocd version --client
-
-Login argocd using CLI
-
-kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo
-
-argocd login 35-244-2-22.nip.io \
-  --username admin \
-  --password 'DtEahe93LIKB7Yip' \
-  --insecure \
-  --grpc-web
-Final checks
-
-# UI/Ingress
-kubectl get ing -n argocd
-
-# Apps & sync
-argocd app list
-
-argocd app get nginx-app
-
-argocd app sync nginx-app   # if OutOfSync
-
-# Image Updater logs + token script
-kubectl logs -n argocd deploy/argocd-image-updater --tail=200
-
-kubectl exec -it -n argocd deploy/argocd-image-updater -- sh -c '/app/scripts/artifact-registry.sh'
-
-
-
+**Version:** 1.0.0
