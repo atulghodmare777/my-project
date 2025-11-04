@@ -1164,23 +1164,36 @@ helm upgrade --install argocd-image-updater argo/argocd-image-updater \
 
 patch cm as below
 
-kubectl patch configmap argocd-image-updater-config -n argocd \
-  --type='json' \
-  -p='[
-    {"op":"add","path":"/data/artifact-registry.sh","value":"#!/bin/sh\nACCESS_TOKEN=$(wget --header '\''Metadata-Flavor: Google'\'' http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token -q -O - | grep -Eo '\''\"access_token\":.*?[^\\\\]",'\'' | cut -d '\"' -f 4)\necho \"oauth2accesstoken:${ACCESS_TOKEN}\" \n"},
-    {"op":"add","path":"/data/registries.conf","value":"registries:\n- name: Google Container Registry\n  prefix: gcr.io\n  api_url: https://gcr.io\n  credentials: ext:/app/scripts/artifact-registry.sh\n  defaultns: nviz-playground\n  insecure: no\n  ping: yes\n  credsexpire: 15m\n  default: true\n"},
-    {"op":"add","path":"/data/interval","value":"1m"},
-    {"op":"add","path":"/data/kube.events","value":"false"},
-    {"op":"add","path":"/data/log.level","value":"info"}
-  ]'
+kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-image-updater-config
+  namespace: argocd
+data:
+  artifact-registry.sh: |
+    #!/bin/sh
+    ACCESS_TOKEN=$(wget --header 'Metadata-Flavor: Google' \
+      http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token \
+      -q -O - | grep -Eo '"access_token":.*?[^\\]",' | cut -d '"' -f 4)
+    echo "oauth2accesstoken:${ACCESS_TOKEN}"
 
+  interval: "1m"
+  kube.events: "false"
+  log.level: "info"
 
-kubectl patch deployment argocd-image-updater -n argocd --type='json' -p='[
-  {"op":"add","path":"/spec/template/spec/containers/0/volumeMounts/-","value":{
-    "mountPath":"/app/scripts",
-    "name":"artifact-registry"
-  }}
-]'
+  registries.conf: |
+    registries:
+    - name: Google Container Registry
+      prefix: gcr.io
+      api_url: https://gcr.io
+      credentials: ext:/app/scripts/artifact-registry.sh
+      defaultns: nviz-playground
+      insecure: no
+      ping: yes
+      credsexpire: 15m
+      default: true
+EOF
 
 
 kubectl patch deployment argocd-image-updater -n argocd --type='json' -p='[
@@ -1193,6 +1206,17 @@ kubectl patch deployment argocd-image-updater -n argocd --type='json' -p='[
     }
   }}
 ]'
+
+
+kubectl patch deployment argocd-image-updater -n argocd --type='json' -p='[
+  {"op":"add","path":"/spec/template/spec/containers/0/volumeMounts/-","value":{
+    "mountPath":"/app/scripts",
+    "name":"artifact-registry"
+  }}
+]'
+
+
+
 
 
 kubectl rollout restart deployment/argocd-image-updater -n argocd
@@ -1226,6 +1250,16 @@ gcloud iam service-accounts add-iam-policy-binding "$GSA_EMAIL" \
   --role "roles/iam.workloadIdentityUser" \
   --project "$PROJECT_ID"
 
+# CHECK whether kubeip-gcp-sa already has Artifact Registry reader
+gcloud projects get-iam-policy nviz-playground \
+  --flatten="bindings[].members" \
+  --format="table(bindings.role,bindings.members)" \
+  --filter="bindings.members:serviceAccount:kubeip-gcp-sa@nviz-playground.iam.gserviceaccount.com AND bindings.role:roles/artifactregistry.reader"
+
+# If the table is empty, then ADD the role:
+gcloud projects add-iam-policy-binding nviz-playground \
+  --member="serviceAccount:kubeip-gcp-sa@nviz-playground.iam.gserviceaccount.com" \
+  --role="roles/artifactregistry.reader"
 
 Install argocd cli
 
@@ -1237,6 +1271,15 @@ Verify installation:
 
 argocd version --client
 
+Login argocd using CLI
+
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo
+
+argocd login 35-244-2-22.nip.io \
+  --username admin \
+  --password 'DtEahe93LIKB7Yip' \
+  --insecure \
+  --grpc-web
 Final checks
 
 # UI/Ingress
