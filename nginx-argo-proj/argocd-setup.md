@@ -1151,7 +1151,11 @@ helm repo update
 
 helm upgrade --install argocd argo/argo-cd -n argocd -f backup/argocd-values.backup.yaml
 
-argocd admin import -n argocd < backup/argocd-backup-YYYY-MM-DD.yaml
+yq 'del(.items[] | select(.kind=="Secret" and .metadata.name=="argocd-secret").data."admin.password") |
+    del(.items[] | select(.kind=="Secret" and .metadata.name=="argocd-secret").data."admin.passwordMtime")' \
+  backup/argocd-backup-2025-11-04.yaml > /tmp/argocd-backup-sanitized.yaml
+
+argocd admin import -n argocd /tmp/argocd-backup-sanitized.yaml
 
 kubectl get secret bitbucket-ssh -n argocd
 
@@ -1214,9 +1218,6 @@ kubectl patch deployment argocd-image-updater -n argocd --type='json' -p='[
     "name":"artifact-registry"
   }}
 ]'
-
-
-
 
 
 kubectl rollout restart deployment/argocd-image-updater -n argocd
