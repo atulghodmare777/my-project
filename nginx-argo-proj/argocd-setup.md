@@ -1139,7 +1139,96 @@ Before deploying to production:
 cmd: argocd version
 create backup directory
 helm get values argocd -n argocd > backup/argocd-values.backup.yaml
+
 helm get values argocd-image-updater -n argocd > backup/argocd-image-updater-values.backup.yaml
+
+argocd admin export -n argocd > backup/argocd-backup-$(date +%F).yaml
+
+## To restore the argocd
+helm repo add argo https://argoproj.github.io/argo-helm || true
+
+helm repo update
+
+helm upgrade --install argocd argo/argo-cd -n argocd -f backup/argocd-values.backup.yaml
+
+argocd admin import -n argocd < backup/argocd-backup-YYYY-MM-DD.yaml
+
+kubectl get secret bitbucket-ssh -n argocd
+
+Create/apply if missing
+
+kubectl apply -f backup/bitbucket-ssh-secret.yaml
+
+helm upgrade --install argocd-image-updater argo/argocd-image-updater \
+  -n argocd -f backup/argocd-image-updater-values.backup.yaml
+
+patch cm as below
+
+kubectl patch configmap argocd-image-updater-config -n argocd \
+  --type='json' \
+  -p='[
+    {"op":"add","path":"/data/artifact-registry.sh","value":"#!/bin/sh\nACCESS_TOKEN=$(wget --header '\''Metadata-Flavor: Google'\'' http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token -q -O - | grep -Eo '\''\"access_token\":.*?[^\\\\]",'\'' | cut -d '\"' -f 4)\necho \"oauth2accesstoken:${ACCESS_TOKEN}\" \n"},
+    {"op":"add","path":"/data/registries.conf","value":"registries:\n- name: Google Container Registry\n  prefix: gcr.io\n  api_url: https://gcr.io\n  credentials: ext:/app/scripts/artifact-registry.sh\n  defaultns: nviz-playground\n  insecure: no\n  ping: yes\n  credsexpire: 15m\n  default: true\n"},
+    {"op":"add","path":"/data/interval","value":"1m"},
+    {"op":"add","path":"/data/kube.events","value":"false"},
+    {"op":"add","path":"/data/log.level","value":"info"}
+  ]'
+
+
+kubectl patch deployment argocd-image-updater -n argocd --type='json' -p='[
+  {"op":"add","path":"/spec/template/spec/containers/0/volumeMounts/-","value":{
+    "mountPath":"/app/scripts",
+    "name":"artifact-registry"
+  }}
+]'
+
+
+kubectl patch deployment argocd-image-updater -n argocd --type='json' -p='[
+  {"op":"add","path":"/spec/template/spec/volumes/-","value":{
+    "name":"artifact-registry",
+    "configMap":{
+      "name":"argocd-image-updater-config",
+      "defaultMode":493,
+      "items":[{"key":"artifact-registry.sh","path":"artifact-registry.sh"}]
+    }
+  }}
+]'
+
+
+kubectl rollout restart deployment/argocd-image-updater -n argocd
+
+kubectl get sa argocd-image-updater -n argocd -o jsonpath='{.metadata.annotations.iam\.gke\.io/gcp-service-account}'; echo
+
+If empty, annotate:
+
+export PROJECT_ID="nviz-playground"
+export KSA_NS="argocd"
+export KSA_NAME="argocd-image-updater"
+export GSA_NAME="argocd-image-updater"
+export GSA_EMAIL="${GSA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+
+kubectl annotate serviceaccount "${KSA_NAME}" -n "${KSA_NS}" \
+  iam.gke.io/gcp-service-account="${GSA_EMAIL}" --overwrite
+
+Check IAM binding:
+
+export CLUSTER="n7-playground-cluster"
+export LOCATION="asia-south1-c"
+export WORKLOAD_POOL=$(gcloud container clusters describe "$CLUSTER" --location "$LOCATION" --format='value(workloadIdentityConfig.workloadPool)')
+
+gcloud iam service-accounts get-iam-policy "$GSA_EMAIL" --project "$PROJECT_ID" \
+  --format="json" | grep -q roles/iam.workloadIdentityUser && echo "binding: OK" || echo "binding: MISSING"
+
+If missing, add:
+
+gcloud iam service-accounts add-iam-policy-binding "$GSA_EMAIL" \
+  --member "serviceAccount:${WORKLOAD_POOL}[${KSA_NS}/${KSA_NAME}]" \
+  --role "roles/iam.workloadIdentityUser" \
+  --project "$PROJECT_ID"
+
+
+Install argocd cli
+
 
 
 
