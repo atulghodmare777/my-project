@@ -1132,3 +1132,14 @@ Before deploying to production:
 ---
 
 ##
+
+
+
+## Backup 
+cmd: argocd version
+create backup directory
+helm get values argocd -n argocd > backup/argocd-values.backup.yaml
+helm get values argocd-image-updater -n argocd > backup/argocd-image-updater-values.backup.yaml
+
+
+
