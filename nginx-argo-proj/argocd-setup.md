@@ -1229,6 +1229,30 @@ gcloud iam service-accounts add-iam-policy-binding "$GSA_EMAIL" \
 
 Install argocd cli
 
+VERSION=v3.1.9 #make it same as argocd version
+curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/download/$VERSION/argocd-linux-amd64
+chmod +x argocd
+sudo mv argocd /usr/local/bin/
+Verify installation:
+
+argocd version --client
+
+Final checks
+
+# UI/Ingress
+kubectl get ing -n argocd
+
+# Apps & sync
+argocd app list
+
+argocd app get nginx-app
+
+argocd app sync nginx-app   # if OutOfSync
+
+# Image Updater logs + token script
+kubectl logs -n argocd deploy/argocd-image-updater --tail=200
+
+kubectl exec -it -n argocd deploy/argocd-image-updater -- sh -c '/app/scripts/artifact-registry.sh'
 
 
 
