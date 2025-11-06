@@ -1319,6 +1319,8 @@ argocd version --client
 ```bash
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo
 
+argocd logout 35-244-2-22.nip.io
+
 argocd login 35-244-2-22.nip.io \
   --username admin \
   --password 'DtEahe93LIKB7Yip' \
