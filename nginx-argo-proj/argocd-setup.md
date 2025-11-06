@@ -1090,6 +1090,11 @@ helm get values argocd-image-updater -n argocd > backup/argocd-image-updater-val
 ```bash
 argocd admin export -n argocd > backup/argocd-backup-$(date +%F).yaml
 ```
+#### Remember helm version for argocd and imgage updator
+argocd version
+helm search repo argo/argo-cd --versions | grep <version_value>
+# For image updator
+helm search repo argo/argocd-image-updater --versions | head
 
 ---
 
@@ -1101,13 +1106,16 @@ argocd admin export -n argocd > backup/argocd-backup-$(date +%F).yaml
 helm repo add argo https://argoproj.github.io/argo-helm || true
 helm repo update
 ```
-
 ---
 
 #### Step 2: Restore ArgoCD installation
 
 ```bash
-helm upgrade --install argocd argo/argo-cd -n argocd -f backup/argocd-values.backup.yaml
+helm upgrade --install argocd argo/argo-cd \
+  --version <helm chart version saved during backup> \
+  -n argocd \
+  -f backup/argocd-values.backup.yaml
+
 ```
 
 ---
@@ -1142,7 +1150,10 @@ kubectl apply -f backup/bitbucket-ssh-secret.yaml
 
 ```bash
 helm upgrade --install argocd-image-updater argo/argocd-image-updater \
-  -n argocd -f backup/argocd-image-updater-values.backup.yaml
+  --version <helm chart version saved above during backup> \
+  -n argocd \
+  -f backup/argocd-image-updater-values.backup.yaml
+
 ```
 
 ---
