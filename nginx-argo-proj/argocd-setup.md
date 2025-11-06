@@ -138,6 +138,43 @@ helm repo update
 ### 2.5 Create ArgoCD Helm values file
 
 Create the values file (replace domain with your actual domain):
+```bash
+certificate:
+  domain: 35-244-2-22.nip.io
+  enabled: true
+  issuer:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: letsencrypt-prod
+configs:
+  cm:
+    admin.enabled: "true"
+    url: https://35-244-2-22.nip.io
+  params:
+    server.insecure: "true"
+  secret:
+    # How to crate this is present in backup docs, password is nvizion
+    argocdServerAdminPassword: $2a$10$LW.CMxKAuG./gWMdYzGSNu3SIdoYULYbM9ekF3bMIKaWlLYHxCfK6
+    argocdServerAdminPasswordMtime: "2025-11-06T00:00:00Z"
+global:
+  domain: 35-244-2-22.nip.io
+server:
+  extraArgs:
+  - --insecure
+  ingress:
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    controller: generic
+    enabled: true
+    hostname: 35-244-2-22.nip.io
+    ingressClassName: nginx
+    path: /
+    pathType: Prefix
+    service:
+      port: 80
+    tls: true
+```
+OR
 
 ```bash
 cat > argocd-values.yaml <<EOF
@@ -1074,7 +1111,17 @@ mkdir -p backup
 ```
 
 #### Backup ArgoCD Helm values
+```bash
+#Optional
+If want to add permanent admin passwod for argocd then create password using following cmd or if previously not present then edit the
+backup/argocd-values.backup.yaml manually first then later it will be present always
 
+PASS='nvizion'
+HASH="$(argocd account bcrypt --password "$PASS")"
+echo "$HASH"
+
+Then paste the HASH in original argocd-values.yaml file and provide the timestamp manually which we did already in above while installing argocd
+```
 ```bash
 helm get values argocd -n argocd > backup/argocd-values.backup.yaml
 ```
@@ -1124,11 +1171,7 @@ helm upgrade --install argocd argo/argo-cd \
 #### Step 3: Sanitize and import ArgoCD backup
 
 ```bash
-yq 'del(.items[] | select(.kind=="Secret" and .metadata.name=="argocd-secret").data."admin.password") |
-    del(.items[] | select(.kind=="Secret" and .metadata.name=="argocd-secret").data."admin.passwordMtime")' \
-  backup/argocd-backup-2025-11-04.yaml > /tmp/argocd-backup-sanitized.yaml
-
-argocd admin import -n argocd /tmp/argocd-backup-sanitized.yaml
+argocd admin import -n argocd backup/argocd-values.backup.yaml
 ```
 
 ---
