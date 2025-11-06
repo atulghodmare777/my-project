@@ -1092,6 +1092,7 @@ argocd admin export -n argocd > backup/argocd-backup-$(date +%F).yaml
 ```
 #### Remember helm version for argocd and imgage updator
 argocd version
+
 helm search repo argo/argo-cd --versions | grep <version_value>
 # For image updator
 helm search repo argo/argocd-image-updater --versions | head
