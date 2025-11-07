@@ -1174,7 +1174,7 @@ helm upgrade --install argocd argo/argo-cd \
 #### Step 3: Sanitize and import ArgoCD backup
 
 ```bash
-argocd admin import -n argocd backup/argocd-values.backup.yaml
+argocd admin import -n argocd backup/argocd-backup-2025-11-06.yaml
 ```
 
 ---
