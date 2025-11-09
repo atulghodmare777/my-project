@@ -1482,7 +1482,7 @@ Then check the pipelinerun logs
 tkn pipelinern list -n test
 tkn pipelinerun logs name -n test
 
-# Now we want to automate it with trigger
+# Now we want to automate it with trigger with specific tag push in bitbucket
 For this to start we require pipeline and tasks already present in the namespace to be created first
 
 Install clone task and kaniko-build task
@@ -1635,6 +1635,10 @@ spec:
       value: $(body.push.changes[0].new.name)
     - name: commit_sha
       value: $(body.push.changes[0].new.target.hash)
+    - name: tag_name
+      value: $(body.push.changes[0].new.name)
+    - name: change_type
+      value: $(body.push.changes[0].new.type)
 
 vi trigger-template.yaml
 apiVersion: triggers.tekton.dev/v1beta1
@@ -1647,6 +1651,7 @@ spec:
     - name: repo_full_name
     - name: branch
     - name: commit_sha
+    - name: tag_name
   resourcetemplates:
     - apiVersion: tekton.dev/v1beta1
       kind: PipelineRun
@@ -1676,7 +1681,8 @@ spec:
           - name: repo-url
             value: git@bitbucket.org:$(tt.params.repo_full_name).git
           - name: image-reference
-            value: asia-south1-docker.pkg.dev/nviz-playground/zendesk/zendesk/myimage:$(tt.params.commit_sha)
+            value: asia-south1-docker.pkg.dev/nviz-playground/zendesk/zendesk/myimage:$(tt.params.tag_name)
+            
 vi trigger.yaml
 apiVersion: triggers.tekton.dev/v1beta1
 kind: Trigger
@@ -1694,7 +1700,11 @@ spec:
         name: "cel"
       params:
         - name: "filter"
-          value: "body.push.changes[0].new.name == 'main'"
+          value: |
+            body.push.changes.size() > 0 &&
+            body.push.changes[0].new != null &&
+            body.push.changes[0].new.type == "tag" &&
+            body.push.changes[0].new.name.matches('^v([0-9]+)\\.([0-9]+)\\.([0-9]+)$')
 
 vi event-listner.yaml
 apiVersion: triggers.tekton.dev/v1beta1
