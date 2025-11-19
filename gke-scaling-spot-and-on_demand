@@ -1,0 +1,150 @@
+autoscaling 
+
+# Create spot nodepool
+gcloud container node-pools create spot-nodepool   --cluster=n7-playground-cluster   --region=asia-south1-c   --spot   --enable-autoscaling   --min-nodes=1   --max-nodes=2   --machine-type=e2-standard-2   --disk-type=pd-standard   --disk-size=20   --num-nodes=1   --node-labels=node-type=spot,cloud.google.com/compute-class=spot-priority-class   --node-taints=cloud.google.com/compute-class=spot-priority-class:NoSchedule
+
+gcloud container node-pools describe spot-nodepool   --cluster=n7-playground-cluster   --region=asia-south1-c
+
+# Update on demand nodepool with following labels, Add ComputeClass label to kubeip-nodepool
+gcloud container node-pools update kubeip-nodepool \
+  --cluster=$CLUSTER_NAME \
+  --region=$REGION \
+  --node-labels="cloud.google.com/compute-class=spot-priority-class,node-type=on-demand"
+
+# Add ComputeClass taint to kubeip-nodepool
+gcloud container node-pools update kubeip-nodepool \
+  --cluster=n7-playground-cluster \
+  --region=asia-south1-c \
+  --node-taints="cloud.google.com/compute-class=spot-priority-class:NoSchedule"
+
+# Check both node pools' labels and taints
+gcloud container node-pools describe spot-nodepool \
+  --cluster=n7-playground-cluster \
+  --region=asia-south1-c \
+  --format="value(config.labels,config.taints)"
+
+gcloud container node-pools describe kubeip-nodepool \
+  --cluster=n7-playground-cluster \
+  --region=asia-south1-c \
+  --format="value(config.labels,config.taints)"
+
+# Both should show the same ComputeClass label and taint
+
+# Gradual Migration (For Production)
+
+Add toleration to each deployment before adding the taint:
+# Patch each deployment to add toleration
+kubectl patch deployment DEPLOYMENT_NAME -n NAMESPACE -p '
+spec:
+  template:
+    spec:
+      tolerations:
+      - key: cloud.google.com/compute-class
+        operator: Equal
+        value: spot-priority-class
+        effect: NoSchedule
+'
+
+# This triggers a rolling update with the new toleration
+
+# Create the ComputeClass
+
+vi spot-priority-compute-class.yaml
+apiVersion: cloud.google.com/v1
+kind: ComputeClass
+metadata:
+  name: spot-priority-class
+spec:
+  # Priority order: GKE tries these in sequence
+  priorities:
+    # Priority 1: Try spot-nodepool FIRST
+    # This is where we want most workloads to run for cost savings
+    - nodepools:
+        - spot-nodepool
+
+    # Priority 2: Fall back to on-demand kubeip-nodepool
+    # Only used when spot capacity is exhausted or unavailable
+    - nodepools:
+        - kubeip-nodepool
+
+  # Behavior when NEITHER node pool can accommodate pods
+  # ScaleUpAnyway: GKE will try to scale up any available pool
+  # DoNotScaleUp: Pods remain pending until capacity is available (safer for production)
+  whenUnsatisfiable: ScaleUpAnyway
+
+  # Active migration: Automatically move workloads back to higher priority pools
+  # When spot capacity becomes available, GKE will migrate pods from
+  # on-demand back to spot nodes
+  activeMigration:
+    optimizeRulePriority: true
+
+  # Node consolidation: Remove underutilized nodes to save costs
+  autoscalingPolicy:
+    # Wait 5 minutes before removing underutilized nodes
+    consolidationDelayMinutes: 5
+    # Consider nodes underutilized if CPU/memory usage < 70%
+    consolidationThreshold: 70
+
+# vi test-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spot-test-app
+  namespace: default
+  labels:
+    app: spot-test
+spec:
+  replicas: 3  # Start with 3 replicas
+  selector:
+    matchLabels:
+      app: spot-test
+  template:
+    metadata:
+      labels:
+        app: spot-test
+    spec:
+      # THIS IS CRITICAL: Request the ComputeClass
+      # Pods will only schedule on nodes with matching label
+      nodeSelector:
+        cloud.google.com/compute-class: spot-priority-class
+      
+      # THIS IS REQUIRED: Tolerate the taint we added to both node pools
+      # Without this, pods cannot schedule on tainted nodes
+      tolerations:
+      - key: cloud.google.com/compute-class
+        operator: Equal
+        value: spot-priority-class
+        effect: NoSchedule
+      
+      containers:
+      - name: nginx
+        image: nginx:latest
+        resources:
+          requests:
+            cpu: "500m"      # 0.5 CPU cores
+            memory: "512Mi"   # 512 MB RAM
+          limits:
+            cpu: "1000m"      # 1 CPU core max
+            memory: "1Gi"     # 1 GB RAM max
+        ports:
+        - containerPort: 80
+          name: http
+        
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 3
+      
+      # Graceful shutdown for spot interruptions
+      # Gives pod 30 seconds to finish requests before termination
+      terminationGracePeriodSeconds: 30
