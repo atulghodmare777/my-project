@@ -132,4 +132,174 @@ spec:
     secretName: vault-tls  # Requires a TLS secret (use cert-manager or upload manually)
 
 
+#  Enable Username/Password Authentication
+# Enable userpass auth method
+kubectl exec -n vault vault-0 -- vault auth enable userpass
+
+# Verify it's enabled
+kubectl exec -n vault vault-0 -- vault auth list
+
+#Create Policies (RBAC)
+Admin Policy (Full access):
+vi admin-policy.hcl
+# Full access to all secrets
+path "secret/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+
+path "kv/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+
+# Manage policies
+path "sys/policies/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+
+# Manage auth methods
+path "auth/*" {
+  capabilities = ["create", "read", "update", "delete", "list", "sudo"]
+}
+
+# Manage users
+path "auth/userpass/users/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+
+kubectl exec -i -n vault vault-0 -- vault policy write admin-policy - < admin-policy.hcl
+
+#Developer Policy (Read/Write secrets):
+vi developer-policy.hcl
+# Read and write access to dev secrets
+path "secret/data/dev/*" {
+  capabilities = ["create", "read", "update", "list"]
+}
+
+path "secret/metadata/dev/*" {
+  capabilities = ["list", "read"]
+}
+
+# Read-only access to prod secrets
+path "secret/data/prod/*" {
+  capabilities = ["read", "list"]
+}
+
+path "secret/metadata/prod/*" {
+  capabilities = ["list", "read"]
+}
+
+kubectl exec -i -n vault vault-0 -- vault policy write dev-policy - < developer-policy.hcl
+
+#App Policy (Read-only for applications):
+vi app-policy.hcl
+path "secret/data/apps/*" {
+  capabilities = ["read", "list"]
+}
+
+path "secret/metadata/apps/*" {
+  capabilities = ["list", "read"]
+}
+
+kubectl exec -i -n vault vault-0 -- vault policy write app-policy - < app-policy.hcl
+
+# Create Users with Roles
+# Create admin user
+kubectl exec -n vault vault-0 -- vault write auth/userpass/users/admin \
+    password="AdminPass123!" \
+    policies="admin-policy"
+
+# Create developer user
+kubectl exec -n vault vault-0 -- vault write auth/userpass/users/atul-dev \
+    password="DevPass123!" \
+    policies="dev-policy"
+
+# Create another developer
+kubectl exec -n vault vault-0 -- vault write auth/userpass/users/jane-dev \
+    password="DevPass456!" \
+    policies="dev-policy"
+
+# Create application service account
+kubectl exec -n vault vault-0 -- vault write auth/userpass/users/app-reader \
+    password="AppPass789!" \
+    policies="app-policy"
+
+# Now we can login using the username and password as configured above
+
+# we can login using CLI as well
+# Login as developer
+kubectl exec -n vault vault-0 -- vault login -method=userpass \
+    username=john-dev \
+    password=DevPass123!
+
+# Check current token info
+kubectl exec -n vault vault-0 -- vault token lookup
+
+# List accessible paths (should only see dev/* paths)
+kubectl exec -n vault vault-0 -- vault list secret/metadata/
+
+# Enable and Configure KV Secrets Engine
+Enable KV v2 Secrets Engine
+# Login as root again
+kubectl exec -n vault vault-0 -- vault login <YOUR_ROOT_TOKEN>
+
+# Enable KV v2 at path "secret"
+kubectl exec -n vault vault-0 -- vault secrets enable -path=secret kv-v2
+
+# Verify
+kubectl exec -n vault vault-0 -- vault secrets list
+
+#  Create Test Secrets
+$ Development Secrets:
+# Database credentials
+kubectl exec -n vault vault-0 -- vault kv put secret/dev/database \
+    username="dev_user" \
+    password="dev_password_123" \
+    host="dev-db.example.com" \
+    port="5432"
+
+# API Keys
+kubectl exec -n vault vault-0 -- vault kv put secret/dev/api-keys \
+    stripe_key="sk_test_123456" \
+    sendgrid_key="SG.dev_key_789" \
+    github_token="ghp_dev_token_abc"
+
+# Application Config
+kubectl exec -n vault vault-0 -- vault kv put secret/dev/app-config \
+    app_name="myapp-dev" \
+    environment="development" \
+    debug_mode="true" \
+    log_level="debug"
+
+$ Production Secrets:
+# Production Database
+kubectl exec -n vault vault-0 -- vault kv put secret/prod/database \
+    username="prod_user" \
+    password="SuperSecureProdPass123!" \
+    host="prod-db.example.com" \
+    port="5432" \
+    ssl_mode="require"
+
+# Production API Keys
+kubectl exec -n vault vault-0 -- vault kv put secret/prod/api-keys \
+    stripe_key="sk_live_987654" \
+    sendgrid_key="SG.prod_key_456" \
+    github_token="ghp_prod_token_xyz"
+
+$ Application Secrets:
+# App-specific secrets
+kubectl exec -n vault vault-0 -- vault kv put secret/apps/webapp \
+    db_connection="postgresql://user:pass@host:5432/db" \
+    redis_url="redis://redis:6379/0" \
+    jwt_secret="my-super-secret-jwt-key"
+
+kubectl exec -n vault vault-0 -- vault kv put secret/apps/api-service \
+    service_account_key='{"type":"service_account","project_id":"my-project"}' \
+    oauth_client_id="123456789.apps.googleusercontent.com" \
+    oauth_client_secret="client_secret_abc123"
+ 
+# Test Secret Access with Different Users
+# Login as developer
+kubectl exec -n vault vault-0 -- vault login -method=userpass \
+    username=john-dev \
+    password=DevPass123!
 
