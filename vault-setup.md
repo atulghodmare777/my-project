@@ -303,3 +303,272 @@ kubectl exec -n vault vault-0 -- vault login -method=userpass \
     username=john-dev \
     password=DevPass123!
 
+# Should work - read dev secrets
+kubectl exec -n vault vault-0 -- vault kv get secret/dev/database
+
+# Should work - write to dev secrets
+kubectl exec -n vault vault-0 -- vault kv put secret/dev/test \
+    key1="value1" \
+    key2="value2"
+
+# Should work - read prod secrets (read-only)
+kubectl exec -n vault vault-0 -- vault kv get secret/prod/database
+
+# Should FAIL - write to prod secrets
+kubectl exec -n vault vault-0 -- vault kv put secret/prod/test \
+    key="value"
+# Expected: permission denied
+
+# Should FAIL - read app secrets
+kubectl exec -n vault vault-0 -- vault kv get secret/apps/webapp
+# Expected: permission denied
+
+#  Kubernetes Integration - Pod Access to Vault
+Enable Kubernetes Authentication
+# Login as root
+kubectl exec -n vault vault-0 -- vault login <YOUR_ROOT_TOKEN>
+
+# Enable Kubernetes auth
+kubectl exec -n vault vault-0 -- vault auth enable kubernetes
+
+# Configure Kubernetes auth to talk to K8s API
+kubectl exec -n vault vault-0 -- vault write auth/kubernetes/config \
+    kubernetes_host="https://kubernetes.default.svc:443"
+
+# Create Kubernetes Auth Role
+# Create role for pods in 'default' namespace
+kubectl exec -n vault vault-0 -- vault write auth/kubernetes/role/webapp-role \
+    bound_service_account_names=webapp-sa \
+    bound_service_account_namespaces=default \
+    policies=app-policy \
+    ttl=24h
+
+# Create Test Application Namespace and ServiceAccount
+# Create ServiceAccount
+kubectl create serviceaccount webapp-sa -n default
+
+# Verify
+kubectl get sa webapp-sa -n default
+
+# Deploy Test Application that Reads from Vault
+Create file test-app.yaml:
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vault-test-app
+  namespace: default
+  labels:
+    app: vault-test
+spec:
+  serviceAccountName: webapp-sa
+  containers:
+  - name: app
+    image: ubuntu:22.04
+    command: 
+      - sleep
+      - "3600"
+    env:
+    - name: VAULT_ADDR
+      value: "http://vault.vault.svc.cluster.local:8200"
+
+kubectl apply -f test-app.yaml
+
+# Wait for pod to be ready
+kubectl wait --for=condition=ready pod/vault-test-app -n default --timeout=60s
+
+# Test Vault Access from Pod
+# Exec into the pod
+kubectl exec -it vault-test-app -n default -- bash
+
+# Inside the pod, install curl and jq
+apt-get update && apt-get install -y curl jq
+
+# Get Kubernetes service account token
+KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+
+# Login to Vault using Kubernetes auth
+VAULT_TOKEN=$(curl -s --request POST \
+    --data '{"jwt": "'"$KUBE_TOKEN"'", "role": "webapp-role"}' \
+    http://vault.vault.svc.cluster.local:8200/v1/auth/kubernetes/login | jq -r '.auth.client_token')
+
+echo "Vault Token: $VAULT_TOKEN"
+
+# Read secret from Vault
+curl -s \
+    --header "X-Vault-Token: $VAULT_TOKEN" \
+    http://vault.vault.svc.cluster.local:8200/v1/secret/data/apps/webapp | jq
+
+# Should see the webapp secrets!
+
+# Vault Agent Injector (Sidecar Pattern)
+Deploy App with Vault Injector Annotations
+Create app-with-vault-injector.yaml:
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: webapp-with-secrets
+  namespace: default
+  annotations:
+    vault.hashicorp.com/agent-inject: "true"
+    vault.hashicorp.com/role: "webapp-role"
+    vault.hashicorp.com/agent-inject-secret-database: "secret/data/apps/webapp"
+    vault.hashicorp.com/agent-inject-template-database: |
+      {{- with secret "secret/data/apps/webapp" -}}
+      export DB_CONNECTION="{{ .Data.data.db_connection }}"
+      export REDIS_URL="{{ .Data.data.redis_url }}"
+      export JWT_SECRET="{{ .Data.data.jwt_secret }}"
+      {{- end }}
+spec:
+  serviceAccountName: webapp-sa
+  containers:
+  - name: app
+    image: nginx:latest
+    ports:
+    - containerPort: 80
+   
+kubectl apply -f app-with-vault-injector.yaml
+
+# Check pods - should see 2 containers (app + vault-agent)
+kubectl get pod webapp-with-secrets -n default
+
+# Check the injected secrets
+kubectl exec webapp-with-secrets -n default -c app -- cat /vault/secrets/database
+
+#  Store Kubernetes Secrets in Vault
+ Migrate Existing K8s Secrets to Vault
+ # Create a traditional K8s secret first
+kubectl create secret generic app-secret \
+    --from-literal=api-key=my-api-key-123 \
+    --from-literal=db-password=secret-password \
+    -n default
+
+# Extract and store in Vault
+kubectl get secret app-secret -n default -o json | \
+kubectl exec -i vault-0 -n vault -- vault kv put secret/k8s/default/app-secret \
+    api-key="my-api-key-123" \
+    db-password="secret-password"
+
+# Verify
+kubectl exec -n vault vault-0 -- vault kv get secret/k8s/default/app-secret
+
+# Delete the K8s secret (now managed by Vault)
+kubectl delete secret app-secret -n default
+
+# Create External Secrets Operator Integration (Advanced)
+Install External Secrets Operator:
+helm repo add external-secrets https://charts.external-secrets.io
+helm install external-secrets \
+   external-secrets/external-secrets \
+    -n external-secrets-system \
+    --create-namespace
+
+Create SecretStore for Vault:
+apiVersion: external-secrets.io/v1beta1
+kind: SecretStore
+metadata:
+  name: vault-backend
+  namespace: default
+spec:
+  provider:
+    vault:
+      server: "http://vault.vault.svc.cluster.local:8200"
+      path: "secret"
+      version: "v2"
+      auth:
+        kubernetes:
+          mountPath: "kubernetes"
+          role: "webapp-role"
+          serviceAccountRef:
+            name: "webapp-sa"
+
+
+Create ExternalSecret:
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: webapp-secrets
+  namespace: default
+spec:
+  refreshInterval: 15s
+  secretStoreRef:
+    name: vault-backend
+    kind: SecretStore
+  target:
+    name: webapp-k8s-secret
+    creationPolicy: Owner
+  data:
+  - secretKey: db_connection
+    remoteRef:
+      key: apps/webapp
+      property: db_connection
+  - secretKey: redis_url
+    remoteRef:
+      key: apps/webapp
+      property: redis_url
+  - secretKey: jwt_secret
+    remoteRef:
+      key: apps/webapp
+      property: jwt_secret
+
+
+kubectl apply -f secretstore.yaml
+kubectl apply -f externalsecret.yaml
+
+# Verify K8s secret was created from Vault
+kubectl get secret webapp-k8s-secret -n default
+kubectl get secret webapp-k8s-secret -n default -o yaml
+
+# Advanced Testing Scenarios
+
+Secret Rotation Test
+# Update a secret in Vault
+kubectl exec -n vault vault-0 -- vault kv put secret/apps/webapp \
+    db_connection="postgresql://newuser:newpass@host:5432/db" \
+    redis_url="redis://redis:6379/0" \
+    jwt_secret="updated-jwt-secret-key"
+
+# For Vault Agent Injector - restart pod to get new secrets
+kubectl delete pod webapp-with-secrets -n default
+kubectl apply -f app-with-vault-injector.yaml
+
+# For External Secrets - waits for refreshInterval (15s), then auto-updates
+kubectl get secret webapp-k8s-secret -n default -o yaml
+# Check after 15 seconds - values should update automatically
+
+# Test Secret Versioning
+# KV v2 keeps secret versions
+kubectl exec -n vault vault-0 -- vault kv get -version=1 secret/apps/webapp
+kubectl exec -n vault vault-0 -- vault kv get -version=2 secret/apps/webapp
+
+# Rollback to previous version
+kubectl exec -n vault vault-0 -- vault kv rollback -version=1 secret/apps/webapp
+
+# View metadata
+kubectl exec -n vault vault-0 -- vault kv metadata get secret/apps/webapp
+
+# Test Audit Logging
+# Check audit logs
+kubectl logs -n vault vault-0 | grep "secret/data/apps/webapp"
+
+# Or view audit storage if enabled
+kubectl exec -n vault vault-0 -- cat /vault/audit/audit.log | tail -20
+
+# Test High Availability
+# Check which pod is leader
+kubectl exec -n vault vault-0 -- vault status
+kubectl exec -n vault vault-1 -- vault status
+kubectl exec -n vault vault-2 -- vault status
+
+# Delete the active pod
+kubectl delete pod vault-0 -n vault
+
+# Check failover - another pod becomes active
+kubectl get pods -n vault -w
+
+# Verify cluster still works
+curl http://34.180.48.111:8200/v1/sys/health
+
+
+
+
