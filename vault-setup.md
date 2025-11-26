@@ -570,5 +570,15 @@ kubectl get pods -n vault -w
 curl http://34.180.48.111:8200/v1/sys/health
 
 
+# Next Steps for Production
+
+Enable Auto-Unseal with GCP KMS (currently manual unseal)
+Enable TLS for Vault API (currently TLS disabled)
+Set up Vault Backups (Raft snapshots)
+Configure monitoring (Prometheus/Grafana)
+Implement secret rotation policies
+Set up disaster recovery procedures
+
+
 
 
