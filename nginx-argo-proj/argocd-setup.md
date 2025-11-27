@@ -1360,6 +1360,26 @@ argocd version --client
 ```
 
 ---
+#### If initial admin password is missing then following following steps:
+```
+# Get the current admin password hash from argocd-secret
+kubectl -n argocd get secret argocd-secret -o jsonpath="{.data.admin\.password}" | base64 -d; echo
+
+# If the above shows a bcrypt hash, you can reset it:
+# First, generate a new password hash
+NEW_PASSWORD="your-new-password"
+PASSWORD_HASH=$(argocd account bcrypt --password "$NEW_PASSWORD")
+
+# Update the secret
+kubectl -n argocd patch secret argocd-secret \
+  -p "{\"data\":{\"admin.password\":\"$(echo -n "$PASSWORD_HASH" | base64 -w0)\"}}"
+
+# Clear any mtime to force password update
+kubectl -n argocd patch secret argocd-secret \
+  -p '{"data":{"admin.passwordMtime":""}}'
+
+```
+---
 
 #### Step 14: Login ArgoCD using CLI
 
