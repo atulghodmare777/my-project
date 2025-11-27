@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: nginx-app
-        image: gcr.io/nviz-playground/nginx-app:5e0aaef7ce420d9a67603631cc289b1451ba8d4f
+        image: asia-south1-docker.pkg.dev/argocd-777/web-app/my-image:v1
         ports:
         - containerPort: 80
 
