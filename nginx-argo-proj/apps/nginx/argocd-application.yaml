@@ -4,7 +4,7 @@ metadata:
   name: nginx-app
   namespace: argocd
   annotations:
-    argocd-image-updater.argoproj.io/image-list: nginx=gcr.io/nviz-playground/nginx-app
+    argocd-image-updater.argoproj.io/image-list: nginx=asia-south1-docker.pkg.dev/argocd-777/web-app
     argocd-image-updater.argoproj.io/git-branch: main
     argocd-image-updater.argoproj.io/nginx.update-strategy: newest-build
     argocd-image-updater.argoproj.io/nginx.allow-tags: regexp:^.*
@@ -13,7 +13,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: git@bitbucket.org:NvizionSolutions/n7-playground-nginx.git
+    repoURL: git@github.com:atulghodmare777/my-project.git
     targetRevision: main
     path: apps/nginx
   destination:
