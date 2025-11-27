@@ -2,8 +2,8 @@ resources:
   - k8s/deployment.yaml
   - k8s/service.yaml
 images:
-  - name: gcr.io/nviz-playground/nginx-app
-    newTag: 03140ecdbbe3ec53c80bb461d4f610cc057f650c
+  - name: asia-south1-docker.pkg.dev/argocd-777/web-app/my-image
+    newTag: v1
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 labels:
