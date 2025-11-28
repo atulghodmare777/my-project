@@ -1,0 +1,11 @@
+# shortcuts
+k set image deploy/nginx-app nginx=nginx:1.29.3
+k rollout history deploy/nginx-app
+# Switch to previous image
+k rollout undo deploy/nginx-app 
+
+# create automatically yaml file of pod
+k run nginx-app --image=nginx --dry-run=client -o yaml > pod.yaml
+
+# Create automatically deployment file
+k create deploy nginx-app --image=nginx --dry-run=client -o yaml > deploy.yaml
