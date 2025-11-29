@@ -9,3 +9,89 @@ k run nginx-app --image=nginx --dry-run=client -o yaml > pod.yaml
 
 # Create automatically deployment file
 k create deploy nginx-app --image=nginx --dry-run=client -o yaml > deploy.yaml
+
+# Ports fundamentals
+for node >nodeport(exa: b/w 30000 to 32767 > port which will be accessed by users
+for service > port(exa: 80) > through this port internal services access the application
+for pod > target port ( exa:80) > port on which application can be accessed
+
+# Internally applications(pods) communicate with cluster ip name or its ip as it is static
+# Endpoints: when we describe the svc we can see the info called endpoints, these are nothing but pods ip which are communicated through the respective svc.
+ we can directly check the endpoints of the svc using cmd - k get ep -n namespace
+
+# Types of svc
+cluster IP, NodePort, LoadBalancer, ExternalName, headless svc
+
+Quick cmd to crete svc: 
+# Create a service for a deploy nginx, which serves on port 80 and connects to the containers on port 8000
+kubectl expose deploy nginx --port=80 --target-port=8000
+
+## Create a service for a replicated nginx, which serves on port 80 and connects to the containers on port 8000
+kubectl expose rc nginx --port=80 --target-port=8000
+
+# External Name svc: An ExternalName service in Kubernetes is a special type of service that does not create a ClusterIP, does not do load-balancing, 
+and does not expose any ports. Instead, it simply acts like a DNS alias (CNAME).
+It maps a Kubernetes service name → to an external DNS name.
+Example:
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-external-db
+spec:
+  type: ExternalName
+  externalName: mydb.example.com
+
+Real-time use case examples
+1. Accessing an external database
+If your app inside Kubernetes needs to connect to a database hosted outside (e.g., on AWS RDS, Cloud SQL, on-prem DB):
+externalName: mysql.company.com
+Now apps inside your cluster use:
+mysql.default.svc.cluster.local
+But behind the scenes it connects to:
+mysql.company.com
+Benefit: If the DB hostname changes, you update only one place.
+2. Avoid changing application configurations
+If an application expects to call a service by a Kubernetes service name (e.g., user-service), but the real service lives outside K8s, 
+use ExternalName to avoid code changes.
+3. Multi-cluster communication
+Cluster A can reference a service in Cluster B through an ExternalName.
+
+# Headless svc: A Headless Service is a Kubernetes service without a ClusterIP.
+That means:No load-balancing, No virtual IP, DNS returns the IPs of individual pods, not one service IP
+It is created like this:
+spec:
+  clusterIP: None
+Normally:
+A Service gives you one stable IP, and it load-balances traffic to pods.
+In a Headless Service:
+Kubernetes says:
+“I won’t give you a single IP. I will just give you the list of all pod IPs.”
+So your app can talk directly to each pod.
+Real-time use cases:
+1. Stateful apps (Databases, Kafka, Redis, MongoDB)
+Databases often require that each pod (node) has its own identity and direct connection.
+Example: MongoDB replica set
+mongo-0
+mongo-1
+mongo-2
+
+With a headless service, DNS returns:
+mongo-0.mongo.default.svc.cluster.local
+mongo-1.mongo.default.svc.cluster.local
+mongo-2.mongo.default.svc.cluster.local
+
+Each pod gets its own stable DNS name → required for clustering.
+
+2. Applications needing direct pod-to-pod communication
+Example: A distributed system like: Elasticsearch, Cassandra, ZooKeeper
+These apps must discover each individual node, not a load balancer.
+Headless service allows them to find all nodes easily.
+
+3. Service Mesh or custom load balancing
+If your app wants to do its own load balancing (instead of Kubernetes), it needs raw pod IPs.
+Headless service gives them directly.
+
+4. StatefulSet pod stable networking
+When you run a StatefulSet, Kubernetes automatically creates a headless service so each pod gets a DNS name like:
+web-0.web.default.svc.cluster.local
+web-1.web.default.svc.cluster.local
