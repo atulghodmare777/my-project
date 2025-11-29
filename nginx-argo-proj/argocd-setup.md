@@ -1163,7 +1163,7 @@ helm repo update
 
 ```bash
 helm upgrade --install argocd argo/argo-cd \
-  --version <helm chart version saved during backup> \
+  --version <helm chart version saved during backup(exa: 9.0.6)> \
   -n argocd \
   -f backup/argocd-values.backup.yaml
 
@@ -1197,7 +1197,7 @@ kubectl apply -f backup/bitbucket-ssh-secret.yaml
 
 ```bash
 helm upgrade --install argocd-image-updater argo/argocd-image-updater \
-  --version <helm chart version saved above during backup> \
+  --version <helm chart version saved above during backup(exa: 0.14.0)> \
   -n argocd \
   -f backup/argocd-image-updater-values.backup.yaml
 
