@@ -95,3 +95,8 @@ Headless service gives them directly.
 When you run a StatefulSet, Kubernetes automatically creates a headless service so each pod gets a DNS name like:
 web-0.web.default.svc.cluster.local
 web-1.web.default.svc.cluster.local
+
+# communication scenario
+In the k8s cluster one pod can access other pod with IP for any namespace , pod ip is cluster wide
+In the k8s cluster svc is namespace specific means if we try to access the service of other namespace from existing namespace then we will get
+access denied, we can access other pod through Fully Qualified Domain name(FQDN) , FQDN we will get from the inside the pod /etc/resolv.conf
