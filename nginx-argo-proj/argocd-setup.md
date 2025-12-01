@@ -35,6 +35,79 @@ Before starting, ensure you have:
 13. [Troubleshooting](#13-troubleshooting)
 14. [Production Recommendations](#14-production-recommendations)
 
+## Workload Identity Configuration
+
+### 🔍 Issue Encountered
+
+When the pipeline ran with build and push tasks, the push was failing due to permission errors. The pod was not assuming the assigned Service Account (SA) and was using the default SA instead.
+
+### ✅ Solution
+
+Cluster-level Workload Identity (WI) was enabled, but the old nodepool was still running. WI is automatically enabled only for new nodepools, so we manually updated the existing nodepool.
+
+### Steps
+
+**1. Check if Cluster-Level Workload Identity is Enabled**
+
+```bash
+gcloud container clusters describe n7-playground-cluster \
+    --project=nviz-playground \
+    --zone=asia-south1-c \
+    --format="value(workloadIdentityConfig.workloadPool)"
+```
+
+**2. Enable Workload Identity on Cluster (if not enabled)**
+
+```bash
+gcloud container clusters update n7-playground-cluster \
+    --zone asia-south1-c \
+    --workload-pool=nviz-playground.svc.id.goog
+```
+
+**3. Check if Nodepool has Workload Identity Enabled**
+
+```bash
+gcloud container node-pools describe swap-memory-pool \
+    --cluster=n7-playground-cluster \
+    --zone=asia-south1-c \
+    --format="yaml(config.workloadMetadataConfig)"
+```
+
+**4. Enable Workload Identity on Nodepool**
+
+```bash
+gcloud container node-pools update nodepool-name \
+    --cluster=cluster-name \
+    --zone=asia-south1-c \
+    --workload-metadata=GKE_METADATA
+```
+
+---
+
+## Install Ingress Controller & Cert Manager
+
+> **Why?** Bitbucket webhooks require a public HTTPS endpoint. We install nginx ingress and cert-manager to expose the Tekton EventListener and Dashboard.
+
+### Install Ingress Controller
+
+```bash
+kubectl create ns ingress-nginx
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+helm install ingress-nginx ingress-nginx/ingress-nginx -n ingress-nginx
+```
+
+### Install Cert Manager
+
+```bash
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.crds.yaml
+kubectl create ns cert-manager
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+helm install cert-manager jetstack/cert-manager -n cert-manager
+```
+
+---
 ---
 
 ## 1. SSL Certificate Configuration
