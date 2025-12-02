@@ -587,6 +587,35 @@ kubectl get pods -n argocd -l app.kubernetes.io/name=argocd-image-updater
 Pod should be in `Running` state.
 
 ---
+### 6.5 Create image updator kind (Present from new update of helm)
+
+```bash
+vi nginx-image-updater.yaml
+apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+kind: ImageUpdater
+metadata:
+  name: nginx-app-updater
+  namespace: argocd
+spec:
+  namespace: argocd
+  commonUpdateSettings:
+    updateStrategy: newest-build
+    allowTags: regexp:^v.*$
+  writeBackConfig:
+    method: git
+    gitConfig:
+      branch: main
+      writeBackTarget: kustomization:.
+  applicationRefs:
+    - namePattern: nginx-app
+      images:
+        - alias: nginx
+          imageName: asia-south1-docker.pkg.dev/tekton4/myapp/newimage:v1
+          manifestTargets:
+            kustomize:
+              name: asia-south1-docker.pkg.dev/tekton4/myapp/newimage
+```
+---
 
 ## 7. Configure GCP Workload Identity
 
@@ -806,10 +835,10 @@ data:
   registries.conf: |
     registries:
     - name: Google Container Registry
-      prefix: gcr.io
-      api_url: https://gcr.io
+      prefix: asia-south1-docker.pkg.dev # artifact registy image path
+      api_url: https://asia-south1-docker.pkg.dev
       credentials: ext:/app/scripts/artifact-registry.sh
-      defaultns: nviz-playground
+      defaultns: tekton4 # prokect id
       insecure: no
       ping: yes
       credsexpire: 15m
