@@ -34,6 +34,7 @@ Before starting, ensure you have:
 12. [Common Commands Reference](#12-common-commands-reference)
 13. [Troubleshooting](#13-troubleshooting)
 14. [Production Recommendations](#14-production-recommendations)
+15. [cross project GCP argocd multicluster setup](#16-cross-project)
 
 ## Workload Identity Configuration
 
@@ -1499,6 +1500,160 @@ argocd login 35-244-2-22.nip.io \
 
 ---
 
+#### Step 16: Cross project argocd set up in GCP
+``` bash
+# Grant access to multicluster-2069 Artifact Registry
+gcloud projects add-iam-policy-binding multicluster-2069 \
+  --member="serviceAccount:argocd-image-updater@tekton4.iam.gserviceaccount.com" \
+  --role="roles/artifactregistry.reader"
+
+gcloud projects get-iam-policy multicluster-2069 \
+  --flatten="bindings[].members" \
+  --filter="bindings.members:argocd-image-updater@tekton4.iam.gserviceaccount.com"
+
+cat argocd-image-updater-config.yaml 
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-image-updater-config
+  namespace: argocd
+data:
+  artifact-registry.sh: |
+    #!/bin/sh
+    ACCESS_TOKEN=$(wget --header 'Metadata-Flavor: Google'       http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token       -q -O - | grep -Eo '"access_token":.*?[^\\]",' | cut -d '"' -f 4)
+    echo "oauth2accesstoken:$ACCESS_TOKEN"
+  
+  interval: 1m
+  kube.events: "false"
+  log.level: info
+  
+  registries.conf: |
+    registries:
+    - name: Google Container Registry - tekton4
+      prefix: asia-south1-docker.pkg.dev/tekton4
+      api_url: https://asia-south1-docker.pkg.dev
+      credentials: ext:/app/scripts/artifact-registry.sh
+      defaultns: tekton4
+      insecure: no
+      ping: yes
+      credsexpire: 15m
+      default: true
+    - name: Google Artifact Registry - multicluster-2069
+      prefix: asia-south1-docker.pkg.dev/multicluster-2069
+      api_url: https://asia-south1-docker.pkg.dev
+      credentials: ext:/app/scripts/artifact-registry.sh
+      defaultns: multicluster-2069
+      insecure: no
+      ping: yes
+      credsexpire: 15m
+      default: false
+
+
+gcloud config set project multicluster-2069
+
+gcloud container clusters get-credentials testing \
+  --zone=asia-south1-b \
+  --project=multicluster-2069
+
+switch back to argocd cluster
+kubectl config use-context gke_tekton4_asia-south1-a_argocd
+
+ARGOCD_PASSWORD=$(kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath="{.data.password}" | base64 -d)
+
+# Login to ArgoCD
+argocd login 34-100-179-112.nip.io --username admin --password $ARGOCD_PASSWORD --insecure
+
+argocd cluster add gke_multicluster-2069_asia-south1-b_testing \
+  --name testing-cluster \
+  --yes
+
+argocd cluster list
+
+add the new repo in the argocd
+vi testing-repo-secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: testing-repo-secret
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+type: Opaque
+stringData:
+  url: git@bitbucket.org:woodpeckernew/testing.git  # Replace with your repo URL
+  sshPrivateKey: |
+    -----BEGIN OPENSSH PRIVATE KEY-----
+    b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+    QyNTUxOQAAACC2LunZ9HUZaGrx8Sj/KHYCzhBIEZsJK15h7mTXDQaHUwAAAJiz3unFs97p
+    xQAAAAtzc2gtZWQyNTUxOQAAACC2LunZ9HUZaGrx8Sj/KHYCzhBIEZsJK15h7mTXDQaHUw
+    AAAEAT2Nqw9K9ZeQangBL3uHxCnDm7ppYIjeMJRGSjJUZYZrYu6dn0dRloavHxKP8odgLO
+    EEgRmwkrXmHuZNcNBodTAAAAEGFyZ29jZC1iaXRidWNrZXQBAgMEBQ==
+    -----END OPENSSH PRIVATE KEY-----
+
+apply the file
+
+# create application for testing cluster: 
+vi nginx-app-testing-application.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nginx-app-testing
+  namespace: argocd
+  annotations:
+    argocd-image-updater.argoproj.io/image-list: nginx=asia-south1-docker.pkg.dev/multicluster-2069/myapp/newimage
+    argocd-image-updater.argoproj.io/git-branch: main
+    argocd-image-updater.argoproj.io/nginx.update-strategy: latest
+    argocd-image-updater.argoproj.io/nginx.allow-tags: regexp:^v.*$
+    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/testing-repo-secret
+    argocd-image-updater.argoproj.io/write-back-target: kustomization:nginx-argo-proj/apps/nginx
+spec:
+  project: default
+  source:
+    repoURL: git@bitbucket.org:woodpeckernew/testing.git
+    targetRevision: main
+    path: nginx-argo-proj/apps/nginx/
+  destination:
+    name: testing-cluster  # Use the cluster name we set
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+
+k apply -f nginx-app-testing-application.yaml
+
+vi nginx-image-updater-testing.yaml
+apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+kind: ImageUpdater
+metadata:
+  name: nginx-app-testing-updater
+  namespace: argocd
+spec:
+  namespace: argocd
+  commonUpdateSettings:
+    updateStrategy: newest-build
+    allowTags: regexp:^v.*$
+  writeBackConfig:
+    method: git
+    gitConfig:
+      branch: main
+      writeBackTarget: kustomization:.
+  applicationRefs:
+    - namePattern: nginx-app-testing
+      images:
+        - alias: nginx
+          imageName: asia-south1-docker.pkg.dev/multicluster-2069/myapp/newimage:v1
+          manifestTargets:
+            kustomize:
+              name: asia-south1-docker.pkg.dev/multicluster-2069/myapp/newimage
+
+argocd app get nginx-app-testing
+
+```
+---
 #### Step 15: Final checks
 
 Check UI/Ingress:
