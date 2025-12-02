@@ -1500,7 +1500,7 @@ argocd login 35-244-2-22.nip.io \
 
 ---
 
-#### Step 16: Cross project argocd set up in GCP
+## 16. Cross project argocd set up in GCP
 ``` bash
 # Grant access to multicluster-2069 Artifact Registry
 gcloud projects add-iam-policy-binding multicluster-2069 \
