@@ -395,7 +395,7 @@ Copy this public key output.
 ### 4.4 Add public key to Bitbucket
 
 1. Go to your Bitbucket repository
-2. Navigate to **Repository Settings** → **Access Keys**
+2. Navigate to **Personal bitbucket setting** → **SSH keys** 
 3. Click **Add key**
 4. Paste the public key from step 4.3
 5. Give it a label like "ArgoCD Access"
