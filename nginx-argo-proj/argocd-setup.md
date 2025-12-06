@@ -1625,6 +1625,9 @@ spec:
 
 k apply -f nginx-app-testing-application.yaml
 
+kubectl install crd imageupdaters.argocd-image-updater.argoproj.io
+
+
 vi nginx-image-updater-testing.yaml
 apiVersion: argocd-image-updater.argoproj.io/v1alpha1
 kind: ImageUpdater
