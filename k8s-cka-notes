@@ -107,5 +107,19 @@ k autoscale deploy deployment-name --cpu-percent=70 --min=1 --max=10
 # Create cm using cmd
 k create cm congigmap-name --from-literal=firstname=atul \
 --from-literal=lastname=ghodmare
+To create a yaml file we can run following command:
+k create cm congigmap-name --from-literal=firstname=atul \
+--from-literal=lastname=ghodmare --dry-run=client -o yaml > configmap.yaml
 It will create a cm with env variable we want exa we have created 2 env, we can create n number as per above
 In exam it might ask to update the cm values so we have delete the pod or we might have to create the pod with --force
+
+# SSL
+symmetric encryption: same key used to encrypt and decrypt the data, less secure as during authentication data transfer and key transfer it can be compromised.
+assymmetric encryption:
+create pub and pvt key using ssh key gen utility
+why 2 keys 1 key for encrytption and other key for descryption
+pvt key for encryption and send the pub key to server means in the location .ssh/authorized_key
+During ssh connection authentication data send with prvt key and it will be decrypt at the server end as the server will have both the keys.
+With http request server will have both the keys pvt and pub key created using the openssl utility
+server will have the private key with itself and pub key will be used to encryption of data hence it will be sent to the user, so now user have servers pub key 
+
