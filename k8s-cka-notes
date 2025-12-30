@@ -108,3 +108,4 @@ k autoscale deploy deployment-name --cpu-percent=70 --min=1 --max=10
 k create cm congigmap-name --from-literal=firstname=atul \
 --from-literal=lastname=ghodmare
 It will create a cm with env variable we want exa we have created 2 env, we can create n number as per above
+In exam it might ask to update the cm values so we have delete the pod or we might have to create the pod with --force
