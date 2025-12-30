@@ -103,3 +103,8 @@ access denied, we can access other pod through Fully Qualified Domain name(FQDN)
 
 # create hpa using cmd
 k autoscale deploy deployment-name --cpu-percent=70 --min=1 --max=10 
+
+# Create cm using cmd
+k create cm congigmap-name --from-literal=firstname=atul \
+--from-literal=lastname=ghodmare
+It will create a cm with env variable we want exa we have created 2 env, we can create n number as per above
